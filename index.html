@@ -1,0 +1,454 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ARROW — Pemeriksaan Data</title>
+<style>
+  :root {
+    --primary:#00497D; --accent:#0066B3; --teal:#2E7C9E;
+    --good:#0CA30C; --warn:#FAB219; --warn-ink:#7A4F00;
+    --crit:#D03B3B; --crit-bg:#FDECEC;
+    --ink:#14181C; --ink-2:#52585F; --rule:#DFE4E9; --field:#F2F5F8;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:#EEF1F4;color:var(--ink);
+    font-family:system-ui,-apple-system,"Segoe UI",sans-serif;font-size:15px;line-height:1.5}
+  .bar{background:var(--primary);color:#fff;padding:13px 16px;
+    display:flex;align-items:center;gap:10px;flex-wrap:wrap;position:sticky;top:0;z-index:5}
+  .bar b{font-size:17px}
+  .bar .who{margin-left:auto;font-size:12.5px;opacity:.92;text-align:right;line-height:1.3}
+  main{max-width:900px;margin:0 auto;padding:14px}
+  .card{background:#fff;border:1px solid var(--rule);border-radius:8px;
+    margin-bottom:14px;overflow:hidden}
+  .head{padding:14px 15px;display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+  .head h2{margin:0;font-size:18px;font-weight:680}
+  .head .meta{color:var(--ink-2);font-size:13px}
+  .pill{margin-left:auto;font-size:12px;font-weight:650;padding:4px 11px;border-radius:20px}
+  .pill.wait{background:var(--field);color:var(--ink-2)}
+  .pill.ok{background:#E7F6E7;color:var(--good)}
+  .pill.no{background:var(--crit-bg);color:var(--crit)}
+  .body{border-top:1px solid var(--rule);padding:14px 15px}
+  .stats{display:flex;gap:16px;flex-wrap:wrap;margin-bottom:14px;font-size:13px;
+    color:var(--ink-2)}
+  .stats b{font-size:19px;display:block;font-weight:680;color:var(--ink)}
+
+  .chain{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));
+    gap:8px;margin:4px 0 16px}
+  .step{border:1px solid var(--rule);border-radius:6px;padding:9px 11px;font-size:12.5px}
+  .step .r{font-weight:650;color:var(--ink)}
+  .step .s{color:var(--ink-2)}
+  .step.done{border-color:var(--good);background:#F4FBF4}
+  .step.done .s{color:#0a6b0a}
+  .step.now{border-color:var(--accent);background:#F0F6FC}
+  .step.now .s{color:var(--accent);font-weight:620}
+  .step.no{border-color:var(--crit);background:var(--crit-bg)}
+  .step.no .s{color:var(--crit)}
+
+  .scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;margin-bottom:12px}
+  table{border-collapse:collapse;width:100%;font-size:13px;min-width:640px}
+  th,td{padding:7px 9px;text-align:right;border-bottom:1px solid var(--rule);white-space:nowrap}
+  th{font-size:10.5px;letter-spacing:.04em;text-transform:uppercase;
+    color:var(--ink-2);font-weight:650}
+  th:first-child,td:first-child{text-align:left}
+
+  .segrow{cursor:pointer}
+  .segrow:hover{background:var(--field)}
+  .open{color:var(--accent);font-size:11px;font-weight:650;margin-left:6px}
+  .photos td{padding:0;white-space:normal}
+  .tabs{display:flex;gap:6px;padding:12px 2px 0;flex-wrap:wrap}
+  .tab{font-size:12.5px;font-weight:620;padding:8px 14px;border-radius:16px;
+    background:var(--field);color:var(--ink-2);border:0;cursor:pointer}
+  .tab.on{background:var(--accent);color:#fff}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));
+    gap:12px;padding:12px 2px}
+  .shot{margin:0}
+  .shot img{width:100%;height:140px;object-fit:cover;border-radius:6px;
+    background:var(--field);display:block}
+  .nophoto{width:100%;height:140px;border-radius:6px;background:var(--crit-bg);
+    color:var(--crit);display:flex;align-items:center;justify-content:center;font-size:12px}
+  .shot figcaption{font-size:11.5px;line-height:1.4;margin-top:5px}
+  .shot .w{color:var(--warn-ink)}
+  .note-btn{font-size:11px;font-weight:620;padding:5px 10px;border-radius:12px;
+    background:var(--field);color:var(--accent);border:0;margin-top:5px;cursor:pointer}
+
+  .obs{border:1px solid var(--rule);border-left:3px solid var(--warn);
+    border-radius:6px;padding:12px 14px;margin-bottom:14px}
+  .obs h3{margin:0 0 8px;font-size:13.5px;font-weight:680}
+  .ob{font-size:13px;padding:7px 0;border-top:1px solid var(--rule)}
+  .ob:first-of-type{border-top:0}
+  .ob.done{opacity:.55}
+  .act{font-size:11px;font-weight:620;padding:4px 9px;border-radius:12px;
+    background:var(--field);color:var(--accent);border:0;cursor:pointer}
+
+  .acts{display:flex;gap:10px;flex-wrap:wrap;margin-top:8px}
+  .btn{font:inherit;font-weight:650;border:0;border-radius:8px;padding:13px 20px;
+    min-height:48px;cursor:pointer;flex:1 1 auto}
+  .go{background:var(--primary);color:#fff}
+  .chk{background:var(--accent);color:#fff}
+  .rej{background:#fff;color:var(--crit);border:1.5px solid var(--crit)}
+  button[disabled]{opacity:.4;cursor:default}
+
+  .msg{padding:12px 15px;border-radius:8px;margin-bottom:14px;font-size:14px}
+  .msg.err{background:var(--crit-bg);color:var(--crit)}
+  .msg.ok{background:#E7F6E7;color:#0a6b0a}
+  .note{color:var(--ink-2);font-size:13px;margin:8px 0 0}
+  .dim{color:var(--ink-2)}
+  .ok{color:var(--good)}
+  .bad{color:var(--crit);font-weight:650}
+</style>
+</head>
+<body>
+<div class="bar">
+  <b>ARROW</b>
+  <span>Pemeriksaan Data · <span id="month"></span></span>
+  <span class="who" id="who">memuat…</span>
+</div>
+<main id="main"><p class="note">Memuat data…</p></main>
+
+<script>
+/*
+ * Served from static hosting rather than from Apps Script itself.
+ *
+ * An Apps Script web app opened in a browser that is signed into a Google
+ * account resolves the deployment against that account and returns a Drive
+ * "cannot open file" error, even when the deployment is public. Incognito works
+ * because it sends no cookies — which is the clue: the problem is the account
+ * context, not the link.
+ *
+ * fetch() sends no credentials by default, so every request here is anonymous
+ * and the account context never exists. The endpoint replies with
+ * Access-Control-Allow-Origin: *, and a text/plain content type keeps the
+ * request "simple" so the browser never sends a CORS preflight — Apps Script
+ * cannot answer one.
+ */
+var ENDPOINT = 'https://script.google.com/macros/s/AKfycbwthaaiTv30EvIndL35981bkj0NmAj0BM2rc5Z-JHt27CYIuyumiCokrXRfv6ib1cHq3A/exec';
+
+// The token travels in the fragment, which browsers never send to a server, so
+// it stays out of access logs and Referer headers.
+var params = new URLSearchParams(location.hash.replace(/^#/, ''));
+var TOKEN = params.get('t') || '';
+var MONTH = params.get('m') || '';
+var STATE = null;
+
+document.getElementById('month').textContent = MONTH || '—';
+
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+  });
+}
+
+function say(kind, text) {
+  var m = document.createElement('div');
+  m.className = 'msg ' + kind;
+  m.textContent = text;
+  document.getElementById('main').prepend(m);
+  setTimeout(function () { m.remove(); }, 7000);
+}
+
+function call(action, extra) {
+  var payload = Object.assign({ action: action, token: TOKEN, month: MONTH }, extra || {});
+  return fetch(ENDPOINT, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify(payload)
+  }).then(function (r) { return r.json(); });
+}
+
+function load() {
+  if (!TOKEN) {
+    document.getElementById('main').innerHTML =
+      '<div class="msg err">Tautan tidak lengkap.</div>' +
+      '<p class="note">Buka tautan yang dikirimkan kepada Anda secara utuh, ' +
+      'termasuk bagian setelah tanda #.</p>';
+    return;
+  }
+  call('review')
+    .then(render)
+    .catch(function (e) {
+      document.getElementById('main').innerHTML =
+        '<div class="msg err">Gagal memuat: ' + esc(e.message) + '</div>' +
+        '<p class="note">Periksa koneksi lalu muat ulang halaman.</p>';
+    });
+}
+
+function render(data) {
+  var main = document.getElementById('main');
+  if (!data.ok) {
+    document.getElementById('who').textContent = '';
+    main.innerHTML = '<div class="msg err">' + esc(data.error) + '</div>' +
+      '<p class="note">Minta tautan baru kepada Data Analyst.</p>';
+    return;
+  }
+  STATE = data;
+  document.getElementById('who').innerHTML =
+    esc(data.who.name) + '<br>' + esc(data.who.role) +
+    (data.who.zone ? ' · ' + esc(data.who.zone) : '');
+
+  var visible = data.districts.filter(function (d) {
+    return !data.who.zone || data.who.zone === d.zone;
+  });
+  if (!visible.length) {
+    main.innerHTML = '<p class="note">Belum ada data untuk ' + esc(MONTH) + '.</p>';
+    return;
+  }
+  main.innerHTML = visible.map(card).join('');
+  bindCard();
+}
+
+function card(d) {
+  var rejected = d.signatures.some(function (s) { return s.decision === 'REJECTED'; });
+  var pill = d.approved ? ['ok', 'Disetujui']
+    : rejected ? ['no', 'Ditolak']
+    : ['wait', 'Menunggu ' + (d.waitingOn || '')];
+
+  var chain = STATE.stages.map(function (role) {
+    var sig = null;
+    d.signatures.forEach(function (s) { if (s.role === role) sig = s; });
+    var cls = sig && sig.decision === 'REJECTED' ? 'no'
+      : sig && sig.decision === 'APPROVED' ? 'done'
+      : (!rejected && d.waitingOn === role) ? 'now' : '';
+    var state = sig
+      ? (sig.decision === 'APPROVED' ? '✓ ' : '✕ ') + esc(sig.name) +
+        '<br>' + esc(sig.at)
+      : (d.waitingOn === role ? 'menunggu tanda tangan' : 'belum');
+    return '<div class="step ' + cls + '"><div class="r">' + esc(role) + '</div>' +
+      '<div class="s">' + state +
+      (sig && sig.reason ? '<br>' + esc(sig.reason) : '') + '</div></div>';
+  }).join('');
+
+  var gapTotal = (d.expected == null) ? null : d.total - d.expected;
+
+  var segs = d.segments.map(function (s) {
+    var gap = (s.expected == null) ? null : s.total - s.expected;
+    var gapCell = gap === null ? '<td class="dim">?</td>'
+      : gap === 0 ? '<td class="ok">0</td>'
+      : '<td class="bad">' + (gap > 0 ? '+' : '−') + Math.abs(gap) + '</td>';
+    var sid = (d.zone + '_' + s.segment).replace(/\W/g, '_');
+    return '<tr class="segrow" data-zone="' + esc(d.zone) + '" data-segment="' +
+      esc(s.segment) + '" data-sid="' + sid + '">' +
+      '<td>Segment ' + esc(s.segment) + ' <span class="open">lihat foto</span></td>' +
+      '<td class="dim">' + (s.expected == null ? '?' : s.expected) + '</td>' +
+      '<td>' + s.total + '</td>' + gapCell +
+      '<td>' + (s.good || '—') + '</td>' +
+      '<td>' + (s.damaged || '—') + '</td>' +
+      '<td>' + (s.missing || '—') + '</td>' +
+      '<td>' + (s.noPhoto ? '<b class="bad">' + s.noPhoto + '</b>' : '—') + '</td>' +
+      '<td>' + (s.flagged || '—') + '</td></tr>' +
+      '<tr id="r' + sid + '" class="photos"><td colspan="9"></td></tr>';
+  }).join('');
+
+  var obs = d.observations.length
+    ? '<div class="obs"><h3>Catatan peninjau (' + d.openObservations +
+      ' belum ditindaklanjuti)</h3>' +
+      d.observations.map(function (o) {
+        return '<div class="ob' + (o.actioned ? ' done' : '') + '">' +
+          '<b>Segment ' + esc(o.segment) + ' · KP ' + esc(o.kp) + '</b> · ' +
+          esc(o.category) + '<br>' + esc(o.note) +
+          '<br><span class="dim">' + esc(o.by) + ' · ' + esc(o.role) + ' · ' +
+          esc(o.at) + (o.actioned ? ' · sudah ditindaklanjuti' : '') + '</span>' +
+          (!o.actioned && STATE.who.role === 'Data Analyst'
+            ? ' <button class="act" data-row="' + o.row + '">tandai selesai</button>' : '') +
+          '</div>';
+      }).join('') + '</div>'
+    : '';
+
+  var mine = STATE.canSign && !rejected && d.waitingOn === STATE.who.role &&
+    (!STATE.who.zone || STATE.who.zone === d.zone);
+
+  var why = !STATE.canSign
+    ? STATE.who.role + ' dapat memeriksa dan memberi catatan, tetapi tanda ' +
+      'tangan ada pada alur di atas.'
+    : rejected ? 'Distrik ini ditolak. Perbaiki data lalu ajukan ulang.'
+    : d.approved ? 'Alur persetujuan sudah lengkap.'
+    : 'Menunggu tanda tangan ' + d.waitingOn + ' terlebih dahulu.';
+
+  return '<div class="card">' +
+    '<div class="head"><h2>Distrik ' + esc(d.zone) + '</h2>' +
+      '<span class="meta">' + d.total + ' terekam · ' + (d.damaged + d.missing) +
+      ' temuan' + (gapTotal ? ' · <b class="bad">' + Math.abs(gapTotal) +
+      ' belum didatangi</b>' : '') + '</span>' +
+      '<span class="pill ' + pill[0] + '">' + esc(pill[1]) + '</span></div>' +
+    '<div class="body">' +
+      '<div class="stats">' +
+        '<div><b>' + d.total + '</b>terekam</div>' +
+        (d.expected == null ? ''
+          : '<div><b class="' + (gapTotal === 0 ? 'ok' : 'bad') + '">' +
+            (gapTotal === 0 ? 'lengkap' : (gapTotal > 0 ? '+' : '−') +
+              Math.abs(gapTotal)) + '</b>vs ' + d.expected + ' semestinya</div>') +
+        '<div><b>' + d.good + '</b>baik</div>' +
+        '<div><b>' + d.damaged + '</b>rusak</div>' +
+        '<div><b>' + d.missing + '</b>hilang</div>' +
+        (d.noPhoto ? '<div><b class="bad">' + d.noPhoto + '</b>tanpa foto</div>' : '') +
+        '<div style="flex:1"><b style="font-size:13px">' +
+          esc(d.operators.join(', ')) + '</b>operator</div>' +
+      '</div>' +
+      '<div class="chain">' + chain + '</div>' +
+      obs +
+      (d.reviewedBy.length
+        ? '<p class="note">Sudah ditinjau oleh ' + esc(d.reviewedBy.join(', ')) + '.</p>'
+        : '') +
+      '<div class="scroll"><table><thead><tr><th>Segment</th><th>Semestinya</th>' +
+        '<th>Terekam</th><th>Selisih</th><th>Baik</th><th>Rusak</th><th>Hilang</th>' +
+        '<th>Tanpa foto</th><th>Ditandai</th></tr></thead><tbody>' + segs +
+        '</tbody></table></div>' +
+      (d.expectedFrom
+        ? '<p class="note">"Semestinya" dihitung dari survei ' + esc(d.expectedFrom) +
+          ' pada tab Reference. Selisih negatif berarti ada aset yang belum ' +
+          'didatangi — berbeda dari kondisi "Hilang", yang berarti sudah ' +
+          'didatangi tetapi asetnya tidak ada.</p>'
+        : '<p class="note">Tab Reference belum terisi, jadi kelengkapan tidak ' +
+          'dapat diperiksa.</p>') +
+      (mine && d.openObservations
+        ? '<div class="msg err">Ada ' + d.openObservations + ' catatan peninjau ' +
+          'yang belum ditindaklanjuti. Periksa dulu sebelum menandatangani.</div>'
+        : '') +
+      (!STATE.canSign
+        ? '<div class="acts"><button class="btn chk" data-review="' + esc(d.zone) +
+          '">Tandai sudah saya tinjau</button></div>'
+        : '') +
+      (mine
+        ? '<div class="acts">' +
+          '<button class="btn go" data-sign="' + esc(d.zone) + '">Setujui sebagai ' +
+            esc(STATE.who.role) + '</button>' +
+          '<button class="btn rej" data-reject="' + esc(d.zone) + '">Tolak</button>' +
+          '</div>'
+        : '<p class="note">' + esc(why) + '</p>') +
+    '</div></div>';
+}
+
+function bindCard() {
+  document.querySelectorAll('.segrow').forEach(function (row) {
+    row.addEventListener('click', function () {
+      var cell = document.getElementById('r' + row.dataset.sid).firstElementChild;
+      if (cell.innerHTML) { cell.innerHTML = ''; return; }
+      loadRecords(row.dataset.zone, row.dataset.segment, row.dataset.sid, 'issues');
+    });
+  });
+  document.querySelectorAll('[data-sign]').forEach(function (b) {
+    b.addEventListener('click', function () { sign(b, b.dataset.sign, 'APPROVED'); });
+  });
+  document.querySelectorAll('[data-reject]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      var reason = prompt('Alasan penolakan (wajib diisi):', '');
+      if (reason === null) return;
+      if (!reason.trim()) { say('err', 'Alasan penolakan wajib diisi'); return; }
+      sign(b, b.dataset.reject, 'REJECTED', reason);
+    });
+  });
+  document.querySelectorAll('[data-review]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      b.disabled = true;
+      call('markReviewed', { zone: b.dataset.review })
+        .then(function (res) {
+          say(res.ok ? 'ok' : 'err', res.ok ? 'Ditandai sudah ditinjau' : res.error);
+          load();
+        })
+        .catch(function (e) { b.disabled = false; say('err', e.message); });
+    });
+  });
+  document.querySelectorAll('.act').forEach(function (b) {
+    b.addEventListener('click', function () {
+      b.disabled = true;
+      call('actionObservation', { row: b.dataset.row })
+        .then(function (res) {
+          say(res.ok ? 'ok' : 'err', res.ok ? 'Catatan ditutup' : res.error);
+          load();
+        })
+        .catch(function (e) { b.disabled = false; say('err', e.message); });
+    });
+  });
+}
+
+// Records load per segment, and default to the ones needing a decision. A
+// segment can hold ~950 records, each one a Drive thumbnail request.
+function loadRecords(zone, segment, sid, filter) {
+  var cell = document.getElementById('r' + sid).firstElementChild;
+  cell.innerHTML = '<p class="note">Memuat…</p>';
+
+  call('segmentRecords', { zone: zone, segment: segment, filter: filter })
+    .then(function (res) {
+      if (!res.ok) { cell.innerHTML = '<p class="note">' + esc(res.error) + '</p>'; return; }
+
+      var tabs = '<div class="tabs">' +
+        [['issues', 'Perlu diperiksa'], ['good', 'Baik'], ['all', 'Semua']]
+          .map(function (f) {
+            return '<button class="tab' + (f[0] === res.filter ? ' on' : '') +
+              '" data-filter="' + f[0] + '">' + f[1] + '</button>';
+          }).join('') + '</div>';
+
+      if (!res.records.length) {
+        cell.innerHTML = tabs + '<p class="note">' + (res.filter === 'issues'
+          ? 'Tidak ada yang perlu diperiksa pada segment ini — semuanya Baik dan ' +
+            'tidak ada catatan otomatis.'
+          : 'Tidak ada rekaman.') + '</p>';
+      } else {
+        cell.innerHTML = tabs + '<div class="grid">' + res.records.map(function (r) {
+          return '<figure class="shot">' +
+            (r.photo
+              ? '<a href="' + esc(r.photo) + '" target="_blank" rel="noopener">' +
+                '<img src="' + esc(r.photo) + '" loading="lazy" alt=""></a>'
+              : '<div class="nophoto">tanpa foto</div>') +
+            '<figcaption><b>KP ' + esc(r.kp) + '</b> · ' + esc(r.condition) +
+            '<br>' + esc(r.category) +
+            (r.note ? '<br><i>' + esc(r.note) + '</i>' : '') +
+            (r.why.length ? '<br><span class="w">' + r.why.map(esc).join(' · ') + '</span>' : '') +
+            '<br><span class="dim">' + esc(r.operator) + ' · ' + esc(r.time) + '</span>' +
+            '<br><button class="note-btn" data-kp="' + esc(r.kp) +
+              '" data-category="' + esc(r.category) + '">+ catatan</button>' +
+            '</figcaption></figure>';
+        }).join('') + '</div><p class="note">' +
+          (res.truncated
+            ? 'Menampilkan ' + res.shown + ' dari ' + res.total +
+              ' rekaman. Persempit dengan tab di atas.'
+            : res.total + ' rekaman') +
+          '. Ketuk foto untuk membukanya ukuran penuh.</p>';
+      }
+
+      cell.querySelectorAll('.tab').forEach(function (b) {
+        b.addEventListener('click', function (ev) {
+          ev.stopPropagation();
+          loadRecords(zone, segment, sid, b.dataset.filter);
+        });
+      });
+      cell.querySelectorAll('.note-btn').forEach(function (b) {
+        b.addEventListener('click', function (ev) {
+          ev.stopPropagation();
+          var note = prompt('Catatan untuk KP ' + b.dataset.kp +
+            ' (' + b.dataset.category + '):', '');
+          if (note === null) return;
+          if (!note.trim()) { say('err', 'Catatan tidak boleh kosong'); return; }
+          b.disabled = true;
+          call('observe', {
+            zone: zone, segment: segment, kp: b.dataset.kp,
+            category: b.dataset.category, note: note
+          }).then(function (res) {
+            b.disabled = false;
+            say(res.ok ? 'ok' : 'err',
+              res.ok ? 'Catatan tersimpan atas nama ' + res.by : res.error);
+            if (res.ok) load();
+          }).catch(function (e) { b.disabled = false; say('err', e.message); });
+        });
+      });
+    })
+    .catch(function (e) {
+      cell.innerHTML = '<p class="note">Gagal memuat foto: ' + esc(e.message) + '</p>';
+    });
+}
+
+function sign(button, zone, decision, reason) {
+  document.querySelectorAll('.btn').forEach(function (b) { b.disabled = true; });
+  call('sign', { zone: zone, decision: decision, reason: reason || '' })
+    .then(function (res) {
+      say(res.ok ? 'ok' : 'err',
+        res.ok ? 'Tersimpan — ' + res.role + ' · ' + res.decision : res.error);
+      load();
+    })
+    .catch(function (e) { say('err', e.message); load(); });
+}
+
+load();
+</script>
+</body>
+</html>
