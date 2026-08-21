@@ -44,6 +44,9 @@
   .step.now .s{color:var(--accent);font-weight:620}
   .step.no{border-color:var(--crit);background:var(--crit-bg)}
   .step.no .s{color:var(--crit)}
+  .void{margin-top:7px;padding-top:7px;border-top:1px dashed var(--rule);
+    color:var(--ink-2);font-size:11.5px;text-decoration:line-through;
+    text-decoration-color:var(--rule)}
 
   .scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;margin-bottom:12px}
   table{border-collapse:collapse;width:100%;font-size:13px;min-width:640px}
@@ -198,24 +201,41 @@ function render(data) {
 }
 
 function card(d) {
-  var rejected = d.signatures.some(function (s) { return s.decision === 'REJECTED'; });
+  // A role's state is their LATEST decision, not any row ever — the Approvals
+  // tab is append-only, so a withdrawn rejection stays on the sheet as history.
+  // REVIEWED rows belong to Pipeline Operators and are not chain positions.
+  function decisionsBy(role) {
+    return d.signatures.filter(function (s) {
+      return s.role === role &&
+        (s.decision === 'APPROVED' || s.decision === 'REJECTED');
+    });
+  }
+  var rejected = !!d.rejection;
   var pill = d.approved ? ['ok', 'Disetujui']
     : rejected ? ['no', 'Ditolak']
     : ['wait', 'Menunggu ' + (d.waitingOn || '')];
 
   var chain = STATE.stages.map(function (role) {
-    var sig = null;
-    d.signatures.forEach(function (s) { if (s.role === role) sig = s; });
+    var rows = decisionsBy(role);
+    var sig = rows.length ? rows[rows.length - 1] : null;
     var cls = sig && sig.decision === 'REJECTED' ? 'no'
       : sig && sig.decision === 'APPROVED' ? 'done'
-      : (!rejected && d.waitingOn === role) ? 'now' : '';
+      : (d.waitingOn === role) ? 'now' : '';
     var state = sig
       ? (sig.decision === 'APPROVED' ? '✓ ' : '✕ ') + esc(sig.name) +
         '<br>' + esc(sig.at)
       : (d.waitingOn === role ? 'menunggu tanda tangan' : 'belum');
+    // Withdrawn decisions stay visible. The reason on a withdrawn rejection is
+    // the record of what was wrong; dropping it loses why the batch went back.
+    var history = rows.slice(0, -1).map(function (s) {
+      return '<div class="void">' + (s.decision === 'APPROVED' ? '✓' : '✕') + ' ' +
+        esc(s.name) + ' · ' + esc(s.at) + ' · dicabut' +
+        (s.reason ? '<br>' + esc(s.reason) : '') + '</div>';
+    }).join('');
     return '<div class="step ' + cls + '"><div class="r">' + esc(role) + '</div>' +
       '<div class="s">' + state +
-      (sig && sig.reason ? '<br>' + esc(sig.reason) : '') + '</div></div>';
+      (sig && sig.reason ? '<br>' + esc(sig.reason) : '') + '</div>' +
+      history + '</div>';
   }).join('');
 
   var gapTotal = (d.expected == null) ? null : d.total - d.expected;
@@ -254,15 +274,31 @@ function card(d) {
       }).join('') + '</div>'
     : '';
 
-  var mine = STATE.canSign && !rejected && d.waitingOn === STATE.who.role &&
+  // Deliberately not gated on `rejected`. A standing rejection puts waitingOn
+  // back on the role who made it, so the person who sent the batch back is the
+  // one who releases it once the data is fixed — approving supersedes their own
+  // rejection. Blocking everyone, as this did before, left no way out of a
+  // rejection except editing the sheet by hand.
+  var mine = STATE.canSign && d.waitingOn === STATE.who.role &&
     (!STATE.who.zone || STATE.who.zone === d.zone);
 
   var why = !STATE.canSign
     ? STATE.who.role + ' dapat memeriksa dan memberi catatan, tetapi tanda ' +
       'tangan ada pada alur di atas.'
-    : rejected ? 'Distrik ini ditolak. Perbaiki data lalu ajukan ulang.'
+    : rejected
+      ? 'Ditolak oleh ' + d.rejection.role + ' (' + d.rejection.name + '). ' +
+        'Setelah data diperbaiki, ' + d.rejection.role + ' yang membuka kembali ' +
+        'dengan menyetujui.'
     : d.approved ? 'Alur persetujuan sudah lengkap.'
     : 'Menunggu tanda tangan ' + d.waitingOn + ' terlebih dahulu.';
+
+  var rejectBanner = (rejected && !d.approved)
+    ? '<div class="msg err"><b>Ditolak oleh ' + esc(d.rejection.role) + ' · ' +
+      esc(d.rejection.name) + '</b> (' + esc(d.rejection.at) + ')<br>' +
+      esc(d.rejection.reason) +
+      (mine ? '<br><br>Anda yang menolak. Setelah data diperbaiki, tekan ' +
+        'Setujui di bawah untuk membuka kembali.' : '') + '</div>'
+    : '';
 
   return '<div class="card">' +
     '<div class="head"><h2>Distrik ' + esc(d.zone) + '</h2>' +
@@ -285,6 +321,7 @@ function card(d) {
           esc(d.operators.join(', ')) + '</b>operator</div>' +
       '</div>' +
       '<div class="chain">' + chain + '</div>' +
+      rejectBanner +
       obs +
       (d.reviewedBy.length
         ? '<p class="note">Sudah ditinjau oleh ' + esc(d.reviewedBy.join(', ')) + '.</p>'
@@ -310,9 +347,12 @@ function card(d) {
         : '') +
       (mine
         ? '<div class="acts">' +
-          '<button class="btn go" data-sign="' + esc(d.zone) + '">Setujui sebagai ' +
-            esc(STATE.who.role) + '</button>' +
-          '<button class="btn rej" data-reject="' + esc(d.zone) + '">Tolak</button>' +
+          '<button class="btn go" data-sign="' + esc(d.zone) + '">' +
+            (rejected ? 'Buka kembali & setujui' : 'Setujui sebagai ' +
+              esc(STATE.who.role)) + '</button>' +
+          (rejected ? ''
+            : '<button class="btn rej" data-reject="' + esc(d.zone) +
+              '">Tolak</button>') +
           '</div>'
         : '<p class="note">' + esc(why) + '</p>') +
     '</div></div>';
