@@ -57,6 +57,8 @@
 
   .segrow{cursor:pointer}
   .segrow:hover{background:var(--field)}
+  .segrow.untouched td{background:var(--crit-bg)}
+  .never{color:var(--crit);font-size:11px;font-weight:650;margin-left:6px}
   .open{color:var(--accent);font-size:11px;font-weight:650;margin-left:6px}
   .photos td{padding:0;white-space:normal}
   .tabs{display:flex;gap:6px;padding:12px 2px 0;flex-wrap:wrap}
@@ -75,14 +77,14 @@
   .note-btn{font-size:11px;font-weight:620;padding:5px 10px;border-radius:12px;
     background:var(--field);color:var(--accent);border:0;margin-top:5px;cursor:pointer}
 
-  .cats{border:1px solid var(--rule);border-radius:6px;margin-bottom:14px}
-  .cats summary{padding:11px 13px;font-size:13px;font-weight:620;cursor:pointer;
-    color:var(--accent)}
-  .cats[open] summary{border-bottom:1px solid var(--rule)}
+  .cats{border:1px solid var(--rule);border-radius:6px;margin:12px 2px}
+  .cats h4{margin:0;padding:10px 13px;font-size:13px;font-weight:680;
+    border-bottom:1px solid var(--rule)}
   .cats .scroll{margin:0}
   .cats table{min-width:560px}
   .cats th{vertical-align:bottom;line-height:1.3}
-  .cats .note{padding:0 13px 12px}
+  .cats .note{padding:0 13px 12px;margin:8px 0 0}
+  .photohost{min-height:40px}
 
   .obs{border:1px solid var(--rule);border-left:3px solid var(--warn);
     border-radius:6px;padding:12px 14px;margin-bottom:14px}
@@ -142,6 +144,7 @@ var params = new URLSearchParams(location.hash.replace(/^#/, ''));
 var TOKEN = params.get('t') || '';
 var MONTH = params.get('m') || '';
 var STATE = null;
+var SEGMENTS = {};   // sid -> { seg, refMonth }, filled while the card renders
 
 document.getElementById('month').textContent = MONTH || '—';
 
@@ -255,9 +258,19 @@ function card(d) {
       : gap === 0 ? '<td class="ok">0</td>'
       : '<td class="bad">' + (gap > 0 ? '+' : '−') + Math.abs(gap) + '</td>';
     var sid = (d.zone + '_' + s.segment).replace(/\W/g, '_');
-    return '<tr class="segrow" data-zone="' + esc(d.zone) + '" data-segment="' +
+    // Keyed so the expansion can reach the segment's own figures without
+    // threading them through data- attributes as JSON.
+    SEGMENTS[sid] = { seg: s, refMonth: d.expectedFrom };
+    // Nothing at all recorded here. The row exists only because the reference
+    // month says the segment should hold assets, so it is the strongest signal
+    // on the page: not a bad reading, but nobody having been.
+    var untouched = s.total === 0;
+    return '<tr class="segrow' + (untouched ? ' untouched' : '') +
+      '" data-zone="' + esc(d.zone) + '" data-segment="' +
       esc(s.segment) + '" data-sid="' + sid + '">' +
-      '<td>Segment ' + esc(s.segment) + ' <span class="open">lihat foto</span></td>' +
+      '<td>Segment ' + esc(s.segment) +
+      (untouched ? ' <span class="never">belum didatangi</span>'
+                 : ' <span class="open">lihat foto</span>') + '</td>' +
       '<td class="dim">' + (s.expected == null ? '?' : s.expected) + '</td>' +
       '<td>' + s.total + '</td>' + gapCell +
       '<td>' + (s.good || '—') + '</td>' +
@@ -353,7 +366,6 @@ function card(d) {
           'didatangi tetapi asetnya tidak ada.</p>'
         : '<p class="note">Tab Reference belum terisi, jadi kelengkapan tidak ' +
           'dapat diperiksa.</p>') +
-      categoryTable(d) +
       (mine && d.openObservations
         ? '<div class="msg err">Ada ' + d.openObservations + ' catatan peninjau ' +
           'yang belum ditindaklanjuti. Periksa dulu sebelum menandatangani.</div>'
@@ -376,20 +388,21 @@ function card(d) {
 }
 
 /**
- * This month's condition profile per asset type, against the reference month's.
+ * One segment's condition profile per asset type, against the reference month's
+ * profile for that same segment.
  *
- * A district total says how much came back; it cannot say whether the mix is
- * normal. Twelve damaged KP Signs is either routine or the finding of the
- * cycle, and the only thing that settles it is what the same asset type looked
- * like last time.
+ * Deliberately per segment, not per district. Six damaged KP Signs spread over
+ * seven segments and six in one segment sum to the same district figure, and
+ * only the second is something a reviewer can go and look at. It also lands
+ * next to that segment's photos, which is what the number sends you to.
  *
  * Both sides come from the same place as the "Semestinya" column, so these rows
  * reconcile with the totals above rather than offering a second, competing
  * count.
  */
-function categoryTable(d) {
-  var now = d.categories || {};
-  var ref = d.lastCategories || {};
+function categoryTable(s, refMonthName) {
+  var now = s.categories || {};
+  var ref = s.lastCategories || {};
 
   var names = Object.keys(now);
   Object.keys(ref).forEach(function (k) {
@@ -432,10 +445,10 @@ function categoryTable(d) {
       gapCell + '</tr>';
   }).join('');
 
-  var refMonth = d.expectedFrom ? esc(d.expectedFrom) : 'referensi';
+  var refMonth = refMonthName ? esc(refMonthName) : 'referensi';
 
-  return '<details class="cats"><summary>Rincian per jenis aset — ' +
-      names.length + ' jenis, dibandingkan ' + refMonth + '</summary>' +
+  return '<div class="cats"><h4>Segment ' + esc(s.segment) +
+      ' · per jenis aset, dibanding ' + refMonth + '</h4>' +
     '<div class="scroll"><table><thead><tr>' +
       '<th>Jenis Aset</th>' +
       '<th>' + refMonth + '<br>Total</th><th>' + refMonth + '<br>Rusak</th>' +
@@ -444,16 +457,24 @@ function categoryTable(d) {
       '<th>Bulan ini<br>Hilang</th><th>Selisih</th>' +
     '</tr></thead><tbody>' + rows + '</tbody></table></div>' +
     '<p class="note">Angka merah pada Rusak atau Hilang berarti lebih banyak ' +
-      'daripada ' + refMonth + ' — belum tentu salah, tetapi itulah yang perlu ' +
-      'dilihat fotonya lebih dulu.</p></details>';
+      'daripada ' + refMonth + ' pada segment ini — belum tentu salah, tetapi ' +
+      'itulah yang perlu dilihat fotonya lebih dulu.</p></div>';
 }
 
 function bindCard() {
   document.querySelectorAll('.segrow').forEach(function (row) {
     row.addEventListener('click', function () {
-      var cell = document.getElementById('r' + row.dataset.sid).firstElementChild;
+      var sid = row.dataset.sid;
+      var cell = document.getElementById('r' + sid).firstElementChild;
       if (cell.innerHTML) { cell.innerHTML = ''; return; }
-      loadRecords(row.dataset.zone, row.dataset.segment, row.dataset.sid, 'issues');
+
+      // The breakdown is already in hand from the page load, so it appears at
+      // once; the photos are a second round trip and fill in underneath it.
+      var held = SEGMENTS[sid];
+      cell.innerHTML = (held ? categoryTable(held.seg, held.refMonth) : '') +
+        '<div class="photohost"><p class="note">Memuat foto…</p></div>';
+      loadRecords(row.dataset.zone, row.dataset.segment, sid, 'issues',
+                  cell.querySelector('.photohost'));
     });
   });
   document.querySelectorAll('[data-sign]').forEach(function (b) {
@@ -493,8 +514,11 @@ function bindCard() {
 
 // Records load per segment, and default to the ones needing a decision. A
 // segment can hold ~950 records, each one a Drive thumbnail request.
-function loadRecords(zone, segment, sid, filter) {
-  var cell = document.getElementById('r' + sid).firstElementChild;
+function loadRecords(zone, segment, sid, filter, host) {
+  // Writes into its own container rather than the whole table cell, so the
+  // breakdown above it survives a filter change.
+  var cell = host || document.getElementById('r' + sid)
+    .firstElementChild.querySelector('.photohost');
   cell.innerHTML = '<p class="note">Memuat…</p>';
 
   call('segmentRecords', { zone: zone, segment: segment, filter: filter })
