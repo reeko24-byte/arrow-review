@@ -303,8 +303,15 @@ function card(d) {
   return '<div class="card">' +
     '<div class="head"><h2>Distrik ' + esc(d.zone) + '</h2>' +
       '<span class="meta">' + d.total + ' terekam · ' + (d.damaged + d.missing) +
-      ' temuan' + (gapTotal ? ' · <b class="bad">' + Math.abs(gapTotal) +
-      ' belum didatangi</b>' : '') + '</span>' +
+      ' temuan' +
+      // A shortfall and a surplus are opposite findings and must not share a
+      // label. Only a negative gap means assets were never visited; a positive
+      // one means more was recorded than the Reference month holds — which is
+      // what a newly added category looks like on its first cycle.
+      (gapTotal < 0 ? ' · <b class="bad">' + Math.abs(gapTotal) +
+        ' belum didatangi</b>' : '') +
+      (gapTotal > 0 ? ' · <b class="bad">' + gapTotal +
+        ' lebih dari referensi</b>' : '') + '</span>' +
       '<span class="pill ' + pill[0] + '">' + esc(pill[1]) + '</span></div>' +
     '<div class="body">' +
       '<div class="stats">' +
