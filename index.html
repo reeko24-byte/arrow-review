@@ -433,13 +433,16 @@ function categoryTable(s, refMonthName) {
     var worseDamaged = r && n.Damaged > r.Damaged;
     var worseMissing = r && n.Missing > r.Missing;
 
+    // Baik, Rusak, Hilang -- the three conditions, not a total. The total is
+    // already on the segment row above, and leaving Baik out made the one
+    // condition most records carry the only one you could not see.
     return '<tr>' +
       '<td>' + esc(name) + '</td>' +
-      (r ? '<td class="dim">' + r.total + '</td>' +
+      (r ? '<td class="dim">' + (r.Good || '—') + '</td>' +
            '<td class="dim">' + (r.Damaged || '—') + '</td>' +
            '<td class="dim">' + (r.Missing || '—') + '</td>'
          : '<td class="dim">—</td><td class="dim">—</td><td class="dim">—</td>') +
-      '<td>' + n.total + '</td>' +
+      '<td>' + (n.Good || '—') + '</td>' +
       '<td' + (worseDamaged ? ' class="bad"' : '') + '>' + (n.Damaged || '—') + '</td>' +
       '<td' + (worseMissing ? ' class="bad"' : '') + '>' + (n.Missing || '—') + '</td>' +
       gapCell + '</tr>';
@@ -451,14 +454,15 @@ function categoryTable(s, refMonthName) {
       ' · per jenis aset, dibanding ' + refMonth + '</h4>' +
     '<div class="scroll"><table><thead><tr>' +
       '<th>Jenis Aset</th>' +
-      '<th>' + refMonth + '<br>Total</th><th>' + refMonth + '<br>Rusak</th>' +
+      '<th>' + refMonth + '<br>Baik</th><th>' + refMonth + '<br>Rusak</th>' +
       '<th>' + refMonth + '<br>Hilang</th>' +
-      '<th>Bulan ini<br>Total</th><th>Bulan ini<br>Rusak</th>' +
+      '<th>Bulan ini<br>Baik</th><th>Bulan ini<br>Rusak</th>' +
       '<th>Bulan ini<br>Hilang</th><th>Selisih</th>' +
     '</tr></thead><tbody>' + rows + '</tbody></table></div>' +
     '<p class="note">Angka merah pada Rusak atau Hilang berarti lebih banyak ' +
       'daripada ' + refMonth + ' pada segment ini — belum tentu salah, tetapi ' +
-      'itulah yang perlu dilihat fotonya lebih dulu.</p></div>';
+      'itulah yang perlu dilihat fotonya lebih dulu. Selisih membandingkan ' +
+      'jumlah keseluruhan jenis aset itu, bukan salah satu kondisi.</p></div>';
 }
 
 function bindCard() {
