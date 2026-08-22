@@ -75,6 +75,15 @@
   .note-btn{font-size:11px;font-weight:620;padding:5px 10px;border-radius:12px;
     background:var(--field);color:var(--accent);border:0;margin-top:5px;cursor:pointer}
 
+  .cats{border:1px solid var(--rule);border-radius:6px;margin-bottom:14px}
+  .cats summary{padding:11px 13px;font-size:13px;font-weight:620;cursor:pointer;
+    color:var(--accent)}
+  .cats[open] summary{border-bottom:1px solid var(--rule)}
+  .cats .scroll{margin:0}
+  .cats table{min-width:560px}
+  .cats th{vertical-align:bottom;line-height:1.3}
+  .cats .note{padding:0 13px 12px}
+
   .obs{border:1px solid var(--rule);border-left:3px solid var(--warn);
     border-radius:6px;padding:12px 14px;margin-bottom:14px}
   .obs h3{margin:0 0 8px;font-size:13.5px;font-weight:680}
@@ -344,6 +353,7 @@ function card(d) {
           'didatangi tetapi asetnya tidak ada.</p>'
         : '<p class="note">Tab Reference belum terisi, jadi kelengkapan tidak ' +
           'dapat diperiksa.</p>') +
+      categoryTable(d) +
       (mine && d.openObservations
         ? '<div class="msg err">Ada ' + d.openObservations + ' catatan peninjau ' +
           'yang belum ditindaklanjuti. Periksa dulu sebelum menandatangani.</div>'
@@ -363,6 +373,79 @@ function card(d) {
           '</div>'
         : '<p class="note">' + esc(why) + '</p>') +
     '</div></div>';
+}
+
+/**
+ * This month's condition profile per asset type, against the reference month's.
+ *
+ * A district total says how much came back; it cannot say whether the mix is
+ * normal. Twelve damaged KP Signs is either routine or the finding of the
+ * cycle, and the only thing that settles it is what the same asset type looked
+ * like last time.
+ *
+ * Both sides come from the same place as the "Semestinya" column, so these rows
+ * reconcile with the totals above rather than offering a second, competing
+ * count.
+ */
+function categoryTable(d) {
+  var now = d.categories || {};
+  var ref = d.lastCategories || {};
+
+  var names = Object.keys(now);
+  Object.keys(ref).forEach(function (k) {
+    if (names.indexOf(k) < 0) names.push(k);
+  });
+  if (!names.length) return '';
+
+  // Biggest first: the types carrying the most assets are where a shifted
+  // profile matters, and a long tail of ones and twos should not lead.
+  names.sort(function (a, b) {
+    var d1 = (now[b] ? now[b].total : 0) - (now[a] ? now[a].total : 0);
+    return d1 !== 0 ? d1 : (a < b ? -1 : 1);
+  });
+
+  var rows = names.map(function (name) {
+    var n = now[name] || { total: 0, Good: 0, Damaged: 0, Missing: 0 };
+    var r = ref[name] || null;
+    var gap = r ? n.total - r.total : null;
+
+    // A type absent from the reference month is new, not missing. Its first
+    // cycle has nothing to compare against and that is expected.
+    var gapCell = !r ? '<td class="dim">baru</td>'
+      : gap === 0 ? '<td class="ok">0</td>'
+      : '<td class="bad">' + (gap > 0 ? '+' : '−') + Math.abs(gap) + '</td>';
+
+    // Flagged only against a reference that exists. A new type has nothing to
+    // be worse than, and reddening its first cycle would be noise.
+    var worseDamaged = r && n.Damaged > r.Damaged;
+    var worseMissing = r && n.Missing > r.Missing;
+
+    return '<tr>' +
+      '<td>' + esc(name) + '</td>' +
+      (r ? '<td class="dim">' + r.total + '</td>' +
+           '<td class="dim">' + (r.Damaged || '—') + '</td>' +
+           '<td class="dim">' + (r.Missing || '—') + '</td>'
+         : '<td class="dim">—</td><td class="dim">—</td><td class="dim">—</td>') +
+      '<td>' + n.total + '</td>' +
+      '<td' + (worseDamaged ? ' class="bad"' : '') + '>' + (n.Damaged || '—') + '</td>' +
+      '<td' + (worseMissing ? ' class="bad"' : '') + '>' + (n.Missing || '—') + '</td>' +
+      gapCell + '</tr>';
+  }).join('');
+
+  var refMonth = d.expectedFrom ? esc(d.expectedFrom) : 'referensi';
+
+  return '<details class="cats"><summary>Rincian per jenis aset — ' +
+      names.length + ' jenis, dibandingkan ' + refMonth + '</summary>' +
+    '<div class="scroll"><table><thead><tr>' +
+      '<th>Jenis Aset</th>' +
+      '<th>' + refMonth + '<br>Total</th><th>' + refMonth + '<br>Rusak</th>' +
+      '<th>' + refMonth + '<br>Hilang</th>' +
+      '<th>Bulan ini<br>Total</th><th>Bulan ini<br>Rusak</th>' +
+      '<th>Bulan ini<br>Hilang</th><th>Selisih</th>' +
+    '</tr></thead><tbody>' + rows + '</tbody></table></div>' +
+    '<p class="note">Angka merah pada Rusak atau Hilang berarti lebih banyak ' +
+      'daripada ' + refMonth + ' — belum tentu salah, tetapi itulah yang perlu ' +
+      'dilihat fotonya lebih dulu.</p></details>';
 }
 
 function bindCard() {
