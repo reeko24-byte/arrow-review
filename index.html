@@ -103,6 +103,17 @@
   .rej{background:#fff;color:var(--crit);border:1.5px solid var(--crit)}
   button[disabled]{opacity:.4;cursor:default}
 
+  .gate{padding:20px 18px;max-width:380px;margin:26px auto}
+  .gate h2{margin:0 0 8px;font-size:19px;font-weight:680}
+  .gate label{display:block;margin:14px 0 0;font-size:13px;font-weight:620;
+    color:var(--ink-2)}
+  .gate input{display:block;width:100%;margin-top:5px;padding:13px 12px;
+    font:inherit;font-size:17px;letter-spacing:.25em;border:1px solid var(--rule);
+    border-radius:8px;background:var(--field);color:var(--ink);min-height:48px}
+  .gate input:focus{outline:2px solid var(--accent);outline-offset:1px}
+  .gate .btn{width:100%;margin-top:18px}
+  .gate .note{margin:0 0 4px}
+
   .msg{padding:12px 15px;border-radius:8px;margin-bottom:14px;font-size:14px}
   .msg.err{background:var(--crit-bg);color:var(--crit)}
   .msg.ok{background:#E7F6E7;color:#0a6b0a}
@@ -146,6 +157,24 @@ var MONTH = params.get('m') || '';
 var STATE = null;
 var SEGMENTS = {};   // sid -> { seg, refMonth }, filled while the card renders
 
+/*
+ * The session lives in sessionStorage, not localStorage: it should not outlive
+ * the browser tab on a phone that gets handed around in the field. Wrapped
+ * because a private window or blocked site data makes the accessor itself
+ * throw, and a page that will not load is worse than one that asks for the PIN
+ * again.
+ */
+var SESSION = (function () {
+  try { return sessionStorage.getItem('arrow_session') || ''; } catch (e) { return ''; }
+})();
+
+function store(value) {
+  try {
+    if (value) sessionStorage.setItem('arrow_session', value);
+    else sessionStorage.removeItem('arrow_session');
+  } catch (e) { /* nothing to do; the PIN will simply be asked for again */ }
+}
+
 document.getElementById('month').textContent = MONTH || '—';
 
 function esc(s) {
@@ -163,12 +192,80 @@ function say(kind, text) {
 }
 
 function call(action, extra) {
-  var payload = Object.assign({ action: action, token: TOKEN, month: MONTH }, extra || {});
+  var payload = Object.assign({ action: action, token: TOKEN, session: SESSION,
+                                month: MONTH }, extra || {});
   return fetch(ENDPOINT, {
     method: 'POST',
     headers: { 'Content-Type': 'text/plain;charset=utf-8' },
     body: JSON.stringify(payload)
-  }).then(function (r) { return r.json(); });
+  }).then(function (r) { return r.json(); }).then(function (res) {
+    // A session lasts a working day. When it lapses mid-review, ask for the PIN
+    // again rather than showing an error the reviewer cannot act on.
+    if (res && res.needPin) { SESSION = ''; store(''); askPin(res.error); }
+    return res;
+  });
+}
+
+/**
+ * The PIN gate.
+ *
+ * The link identifies who someone claims to be; this proves it. Until it
+ * existed a forwarded link was a forged signature, so the gate covers reading
+ * too, not only signing -- a link on its own now reaches nothing.
+ */
+function askPin(message, mode) {
+  var changing = mode === 'change';
+  document.getElementById('who').textContent = '';
+  document.getElementById('main').innerHTML =
+    '<div class="card gate">' +
+      '<h2>' + (changing ? 'Ganti PIN' : 'Masukkan PIN') + '</h2>' +
+      '<p class="note">' + (changing
+        ? 'PIN awal diberikan oleh Data Analyst dan harus diganti sebelum ' +
+          'digunakan. Minimal 6 digit, bukan angka berurutan atau berulang.'
+        : 'Tautan ini menyebut siapa Anda; PIN membuktikannya. Hubungi Data ' +
+          'Analyst bila Anda belum memilikinya.') + '</p>' +
+      (message ? '<div class="msg err">' + esc(message) + '</div>' : '') +
+      (changing
+        ? '<label>PIN saat ini<input id="p0" type="password" inputmode="numeric" ' +
+            'autocomplete="current-password"></label>' +
+          '<label>PIN baru<input id="p1" type="password" inputmode="numeric" ' +
+            'autocomplete="new-password"></label>' +
+          '<label>Ulangi PIN baru<input id="p2" type="password" ' +
+            'inputmode="numeric" autocomplete="new-password"></label>'
+        : '<label>PIN<input id="p1" type="password" inputmode="numeric" ' +
+            'autocomplete="current-password" autofocus></label>') +
+      '<button class="btn go" id="pinGo">' +
+        (changing ? 'Simpan PIN baru' : 'Masuk') + '</button>' +
+    '</div>';
+
+  var go = document.getElementById('pinGo');
+  var submit = function () {
+    var v1 = document.getElementById('p1').value;
+    if (changing) {
+      var v0 = document.getElementById('p0').value;
+      var v2 = document.getElementById('p2').value;
+      if (v1 !== v2) { askPin('PIN baru tidak sama', 'change'); return; }
+      go.disabled = true;
+      call('changePin', { currentPin: v0, newPin: v1 }).then(function (res) {
+        if (!res.ok) { askPin(res.error, 'change'); return; }
+        SESSION = res.session; store(SESSION); load();
+      }).catch(function (e) { askPin(e.message, 'change'); });
+      return;
+    }
+    go.disabled = true;
+    call('verifyPin', { pin: v1 }).then(function (res) {
+      if (!res.ok) { askPin(res.error); return; }
+      SESSION = res.session; store(SESSION);
+      if (res.mustChange) { askPin('', 'change'); return; }
+      load();
+    }).catch(function (e) { askPin(e.message); });
+  };
+  go.addEventListener('click', submit);
+  document.querySelectorAll('.gate input').forEach(function (i) {
+    i.addEventListener('keydown', function (ev) {
+      if (ev.key === 'Enter') submit();
+    });
+  });
 }
 
 function load() {
@@ -179,8 +276,10 @@ function load() {
       'termasuk bagian setelah tanda #.</p>';
     return;
   }
+  if (!SESSION) { askPin(''); return; }
+
   call('review')
-    .then(render)
+    .then(function (res) { if (!res.needPin) render(res); })
     .catch(function (e) {
       document.getElementById('main').innerHTML =
         '<div class="msg err">Gagal memuat: ' + esc(e.message) + '</div>' +
