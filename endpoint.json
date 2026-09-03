@@ -1,0 +1,4 @@
+{
+  "exec": "https://script.google.com/macros/s/AKfycbzJDeKhYYCjmeO3iHR4FDMhg_o2V0I6gEOcP5CWxIA3dfmaxVko2fLJFSL_0UEdftz7Dg/exec",
+  "note": "The current Apps Script /exec address. The phone and the review page both read this at start, so a moved deployment is fixed by editing this one line -- no rebuild, no reinstall. Must start https://script.google.com/macros/s/ and end /exec."
+}
