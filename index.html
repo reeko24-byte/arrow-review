@@ -76,6 +76,49 @@
   .shot .w{color:var(--warn-ink)}
   .note-btn{font-size:11px;font-weight:620;padding:5px 10px;border-radius:12px;
     background:var(--field);color:var(--accent);border:0;margin-top:5px;cursor:pointer}
+  .namebar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+    padding:12px 2px 0}
+  .namebar .why{font-size:12.5px;color:var(--text-muted);flex:1;min-width:200px}
+  .btn.nam{background:var(--surface);color:var(--accent);
+    border:1px solid var(--border)}
+  .namehost{padding-top:4px}
+  .task{padding:14px 0;border-top:1px solid var(--border)}
+  .task .row{display:flex;gap:12px;align-items:flex-start}
+  .task .shotcol{width:120px;flex:0 0 120px}
+  .task .shotcol img{width:120px;height:120px;object-fit:cover;border-radius:6px;
+    background:var(--field);display:block}
+  .task .body{flex:1;min-width:0}
+  .task .what{font-size:13.5px;font-weight:600}
+  .task .who{font-size:11.5px;color:var(--text-muted);margin-top:2px}
+  .cands{display:flex;flex-direction:column;gap:6px;margin-top:8px;
+    /* Held narrow so "Ini dia" stays beside the id it belongs to. Full width
+       put the button an inch from its own row on a laptop, which is how the
+       wrong asset gets named. */
+    max-width:460px}
+  .cand{display:flex;align-items:center;gap:10px;padding:6px;border-radius:6px;
+    border:1px solid var(--border);background:var(--surface)}
+  .cand img{width:52px;height:52px;object-fit:cover;border-radius:4px;
+    background:var(--field);flex:0 0 52px}
+  .cand .id{font-family:var(--mono);font-size:12.5px;font-weight:600}
+  .cand .meta{font-size:11.5px;color:var(--text-muted)}
+  .cand .taken{font-size:11.5px;color:var(--warn)}
+  .cand button{margin-left:auto;font-size:12px;font-weight:600;padding:7px 12px;
+    border-radius:12px;background:var(--field);color:var(--accent);border:0;
+    cursor:pointer;white-space:nowrap}
+  .task .newbtn{margin-top:8px;font-size:12px;font-weight:600;padding:7px 12px;
+    border-radius:12px;background:var(--field);color:var(--text);border:0;
+    cursor:pointer}
+  /* On a phone the photographs are the task, so they keep their size and the
+     wording around them gives way instead. */
+  @media (max-width: 460px) {
+    .task .shotcol{width:96px;flex:0 0 96px}
+    .task .shotcol img{width:96px;height:96px}
+    .cand .meta{font-size:11px}
+    .cand img{width:44px;height:44px;flex:0 0 44px}
+  }
+  .task.done{opacity:.55}
+  .task .named{font-family:var(--mono);font-size:12.5px;color:var(--ok);
+    margin-top:8px;display:inline-block}
   .chips{display:flex;gap:6px;padding:8px 2px 0;flex-wrap:wrap}
   .chip{font-size:12px;font-weight:600;padding:6px 11px;border-radius:14px;
     background:var(--surface);color:var(--text-muted);border:1px solid var(--border);
@@ -483,6 +526,19 @@ function card(d) {
           'didatangi tetapi asetnya tidak ada.</p>'
         : '<p class="note">Tab Reference belum terisi, jadi kelengkapan tidak ' +
           'dapat diperiksa.</p>') +
+      // Only the Data Analyst, matching NAMING_ROLES on the server. Everyone
+      // else reviews photographs and signs; naming is a permanent decision
+      // about what an asset is, and it belongs to one desk.
+      (d.unnamed && STATE.who.role === 'Data Analyst'
+        ? '<div class="namebar">' +
+            '<button class="btn nam" data-zone="' + esc(d.zone) + '">' +
+              d.unnamed + ' rekaman tanpa ID</button>' +
+            '<span class="why">Operator tidak menemukan aset yang cocok, jadi ' +
+              'rekaman ini belum punya nama tetap. Beri nama di sini, di mana ' +
+              'seluruh siklus terlihat sekaligus.</span>' +
+          '</div><div class="namehost" id="nh' + esc(d.zone).replace(/\s+/g, '') +
+          '"></div>'
+        : '') +
       (mine && d.openObservations
         ? '<div class="msg err">Ada ' + d.openObservations + ' catatan peninjau ' +
           'yang belum ditindaklanjuti. Periksa dulu sebelum menandatangani.</div>'
@@ -620,6 +676,14 @@ function bindCard() {
         .catch(function (e) { b.disabled = false; say('err', e.message); });
     });
   });
+  document.querySelectorAll('.btn.nam').forEach(function (b) {
+    b.addEventListener('click', function () {
+      var host = document.getElementById('nh' + b.dataset.zone.replace(/\s+/g, ''));
+      if (!host) return;
+      if (host.innerHTML) { host.innerHTML = ''; return; }      // toggle shut
+      loadNaming(b.dataset.zone, host, {});
+    });
+  });
   document.querySelectorAll('.act').forEach(function (b) {
     b.addEventListener('click', function () {
       b.disabled = true;
@@ -631,6 +695,173 @@ function bindCard() {
         .catch(function (e) { b.disabled = false; say('err', e.message); });
     });
   });
+}
+
+/**
+ * The records with no permanent id, each beside the assets it might be.
+ *
+ * Nothing here decides anything. It narrows the candidates to same-type assets
+ * within 150 m, shows last cycle's photograph next to this cycle's, and writes
+ * down what the person says. An id is a permanent name, so the answer has to
+ * come from somebody looking.
+ */
+function loadNaming(zone, host, opts) {
+  opts = opts || {};
+  var segment = opts.segment || '';
+  var offset = opts.offset || 0;
+  host.innerHTML = '<p class="note">Memuat…</p>';
+
+  call('unnamedRecords', { zone: zone, segment: segment, offset: offset })
+    .then(function (res) {
+      if (!res.ok) { host.innerHTML = '<p class="note">' + esc(res.error) + '</p>'; return; }
+      if (!res.total) {
+        host.innerHTML = '<p class="note">Semua rekaman sudah punya ID.</p>';
+        return;
+      }
+
+      var chips = '<div class="chips">' +
+        '<button class="chip' + (segment ? '' : ' on') + '" data-seg="">Semua segment' +
+          '<span class="n">' + res.total + '</span></button>' +
+        (res.segments || []).map(function (g) {
+          return '<button class="chip' + (g.name === res.segment ? ' on' : '') +
+            '" data-seg="' + esc(g.name) + '">' + esc(g.name) +
+            '<span class="n">' + g.count + '</span></button>';
+        }).join('') + '</div>';
+
+      var tasks = res.records.map(function (r) {
+        var cands = r.candidates.length
+          ? '<div class="cands">' + r.candidates.map(function (c) {
+              return '<div class="cand">' +
+                (c.photo
+                  ? '<a href="' + esc(c.photo) + '" target="_blank" rel="noopener">' +
+                    '<img src="' + esc(c.photo) + '" loading="lazy" alt=""></a>'
+                  : '<div class="nophoto" style="width:52px;height:52px;' +
+                    'flex:0 0 52px;font-size:10px">tanpa foto</div>') +
+                '<div><div class="id">' + esc(c.uniqueId) + '</div>' +
+                '<div class="meta">KP ' + esc(c.kp) + ' · ' + c.metres + ' m · ' +
+                  'terakhir ' + esc(c.lastSeen) + ' · ' + esc(c.condition) + '</div>' +
+                (c.claimedThisCycle
+                  ? '<div class="taken">sudah dipakai rekaman lain siklus ini</div>'
+                  : '') +
+                '</div>' +
+                '<button class="pick" data-record="' + esc(r.recordId) +
+                  '" data-id="' + esc(c.uniqueId) + '">Ini dia</button>' +
+                '</div>';
+            }).join('') + '</div>'
+          : '<p class="note">Tidak ada aset sejenis dalam 150 m. Kemungkinan ' +
+            'besar aset baru.</p>';
+
+        return '<div class="task" id="t' + esc(r.recordId) + '">' +
+          '<div class="row">' +
+            '<div class="shotcol">' +
+              (r.photo ? '<a href="' + esc(r.photo) + '" target="_blank" rel="noopener">' +
+                         '<img src="' + esc(r.photo) + '" loading="lazy" alt=""></a>'
+                       : '<div class="nophoto">tanpa foto</div>') +
+            '</div>' +
+            '<div class="body">' +
+              '<div class="what">' + esc(r.segment) + ' · KP ' + esc(r.kp) + ' · ' +
+                esc(r.category) + ' · ' + esc(r.condition) + '</div>' +
+              '<div class="who">' + esc(r.operator) + ' · ' + esc(r.time) +
+                (r.note ? ' · ' + esc(r.note) : '') + '</div>' +
+            '</div>' +
+          '</div>' +
+          cands +
+          '<button class="newbtn" data-record="' + esc(r.recordId) +
+            '">Aset baru — buatkan ID</button>' +
+          '</div>';
+      }).join('');
+
+      var pages = Math.ceil(res.total / res.pageSize);
+      var page = Math.floor(res.offset / res.pageSize) + 1;
+      var pager = pages > 1
+        ? '<div class="pager">' +
+          '<button class="prev"' + (page === 1 ? ' disabled' : '') +
+            '>&lsaquo; Sebelumnya</button>' +
+          '<span class="at">Halaman ' + page + ' dari ' + pages + '</span>' +
+          '<button class="next"' + (page === pages ? ' disabled' : '') +
+            '>Berikutnya &rsaquo;</button></div>'
+        : '';
+
+      host.innerHTML = chips + tasks +
+        '<p class="note">Rekaman ' + (res.offset + 1) + '-' +
+        (res.offset + res.shown) + ' dari ' + res.total + '.</p>' + pager;
+
+      host.querySelectorAll('.chip').forEach(function (b) {
+        b.addEventListener('click', function () {
+          loadNaming(zone, host, { segment: b.dataset.seg });
+        });
+      });
+      host.querySelectorAll('.pager button').forEach(function (b) {
+        b.addEventListener('click', function () {
+          var step = b.className === 'prev' ? -res.pageSize : res.pageSize;
+          loadNaming(zone, host, { segment: segment, offset: res.offset + step });
+          host.scrollIntoView({ block: 'start' });
+        });
+      });
+      host.querySelectorAll('.pick').forEach(function (b) {
+        b.addEventListener('click', function () {
+          nameOne(b, b.dataset.record, b.dataset.id, false);
+        });
+      });
+      host.querySelectorAll('.newbtn').forEach(function (b) {
+        b.addEventListener('click', function () {
+          nameOne(b, b.dataset.record, '', false);
+        });
+      });
+    })
+    .catch(function (e) {
+      host.innerHTML = '<p class="note">Gagal memuat: ' + esc(e.message) + '</p>';
+    });
+}
+
+/**
+ * Write one answer down.
+ *
+ * The card stays on screen with the id it was given rather than vanishing: the
+ * person needs to see what they just did, and a list that reshuffles under the
+ * cursor is how the wrong button gets pressed.
+ */
+function nameOne(button, recordId, uniqueId, force) {
+  var task = document.getElementById('t' + recordId);
+  button.disabled = true;
+  var was = button.textContent;
+  button.textContent = 'Menyimpan…';
+
+  call('nameRecord', { recordId: recordId, uniqueId: uniqueId, force: !!force })
+    .then(function (res) {
+      if (!res.ok && res.needsConfirm) {
+        button.disabled = false;
+        button.textContent = was;
+        if (confirm(res.error + '\n\nDua rekaman akan memakai nama yang sama, ' +
+                    'dan satu aset lain akan selesai siklus tanpa nama. Tetap ' +
+                    'pakai ID ini?')) {
+          nameOne(button, recordId, uniqueId, true);
+        }
+        return;
+      }
+      if (!res.ok) {
+        button.disabled = false;
+        button.textContent = was;
+        say('err', res.error);
+        return;
+      }
+      if (task) {
+        task.classList.add('done');
+        task.querySelectorAll('button').forEach(function (b) { b.disabled = true; });
+        var cands = task.querySelector('.cands');
+        if (cands) cands.remove();
+        var mark = document.createElement('div');
+        mark.className = 'named';
+        mark.textContent = (res.minted ? 'ID baru: ' : 'Diberi ID: ') + res.uniqueId;
+        task.appendChild(mark);
+      }
+      say('ok', (res.minted ? 'ID baru dibuat: ' : 'Tersimpan: ') + res.uniqueId);
+    })
+    .catch(function (e) {
+      button.disabled = false;
+      button.textContent = was;
+      say('err', e.message);
+    });
 }
 
 // Records load per segment, and default to the ones needing a decision. A
