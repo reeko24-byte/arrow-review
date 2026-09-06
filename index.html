@@ -76,6 +76,18 @@
   .shot .w{color:var(--warn-ink)}
   .note-btn{font-size:11px;font-weight:620;padding:5px 10px;border-radius:12px;
     background:var(--field);color:var(--accent);border:0;margin-top:5px;cursor:pointer}
+  .chips{display:flex;gap:6px;padding:8px 2px 0;flex-wrap:wrap}
+  .chip{font-size:12px;font-weight:600;padding:6px 11px;border-radius:14px;
+    background:var(--surface);color:var(--text-muted);border:1px solid var(--border);
+    cursor:pointer}
+  .chip.on{background:var(--accent);color:#fff;border-color:var(--accent)}
+  .chip .n{opacity:.72;margin-left:5px;font-variant-numeric:tabular-nums}
+  .find{display:flex;gap:8px;align-items:center;padding:10px 2px 2px}
+  .find input{font-family:var(--mono);font-size:13px;padding:7px 10px;
+    border:1px solid var(--border);border-radius:6px;background:#fff;width:150px}
+  .find .hint{font-size:11.5px;color:var(--text-muted)}
+  .find button{font-size:12px;font-weight:600;padding:6px 10px;border-radius:12px;
+    background:var(--field);color:var(--accent);border:0;cursor:pointer}
   .pager{display:flex;align-items:center;gap:10px;padding:0 2px 12px}
   .pager button{font-size:12.5px;font-weight:620;padding:9px 16px;
     border-radius:16px;background:var(--field);color:var(--accent);border:0;
@@ -582,8 +594,8 @@ function bindCard() {
       var held = SEGMENTS[sid];
       cell.innerHTML = (held ? categoryTable(held.seg, held.refMonth) : '') +
         '<div class="photohost"><p class="note">Memuat foto…</p></div>';
-      loadRecords(row.dataset.zone, row.dataset.segment, sid, 'issues',
-                  cell.querySelector('.photohost'));
+      loadRecords(row.dataset.zone, row.dataset.segment, sid,
+                  { filter: 'issues' }, cell.querySelector('.photohost'));
     });
   });
   document.querySelectorAll('[data-sign]').forEach(function (b) {
@@ -623,12 +635,24 @@ function bindCard() {
 
 // Records load per segment, and default to the ones needing a decision. A
 // segment can hold ~950 records, each one a Drive thumbnail request.
-function loadRecords(zone, segment, sid, filter, host, offset) {
+function loadRecords(zone, segment, sid, opts, host) {
   // Writes into its own container rather than the whole table cell, so the
   // breakdown above it survives a filter change.
   var cell = host || document.getElementById('r' + sid)
     .firstElementChild.querySelector('.photohost');
-  offset = offset || 0;
+  opts = opts || {};
+  var filter = opts.filter || 'issues';
+  var offset = opts.offset || 0;
+  var category = opts.category || '';
+  var query = opts.query || '';
+
+  // The search box is rebuilt with everything else, so remember where the
+  // cursor was and hand it back afterwards; without this, typing a second
+  // character means clicking the box again.
+  var focused = document.activeElement;
+  var searchHadFocus = !!(focused && focused.classList
+                          && focused.classList.contains('kpfind'));
+  var caret = searchHadFocus ? focused.selectionStart : 0;
 
   // Each page replaces the one before it. Keeping them all on screen would put
   // 344 thumbnails in the document on a phone, which is what the page size
@@ -638,7 +662,7 @@ function loadRecords(zone, segment, sid, filter, host, offset) {
   cell.innerHTML = '<p class="note">Memuat…</p>';
 
   call('segmentRecords', { zone: zone, segment: segment, filter: filter,
-                           offset: offset })
+                           offset: offset, category: category, query: query })
     .then(function (res) {
       if (!res.ok) { cell.innerHTML = '<p class="note">' + esc(res.error) + '</p>'; return; }
 
@@ -649,11 +673,38 @@ function loadRecords(zone, segment, sid, filter, host, offset) {
               '" data-filter="' + f[0] + '">' + f[1] + '</button>';
           }).join('') + '</div>';
 
+      // Counted by the server over everything the condition tab and the search
+      // leave, so a chip says how many there are rather than how many fit on
+      // this page.
+      var chips = '';
+      if ((res.categories || []).length > 1 || res.category) {
+        chips = '<div class="chips">' +
+          '<button class="chip' + (res.category ? '' : ' on') +
+            '" data-cat="">Semua jenis</button>' +
+          (res.categories || []).map(function (c) {
+            return '<button class="chip' + (c.name === res.category ? ' on' : '') +
+              '" data-cat="' + esc(c.name) + '">' + esc(c.name) +
+              '<span class="n">' + c.count + '</span></button>';
+          }).join('') + '</div>';
+      }
+
+      var find = '<div class="find">' +
+        '<input class="kpfind" type="text" inputmode="numeric" placeholder="Cari KP" ' +
+          'value="' + esc(res.query || '') + '">' +
+        (res.query ? '<button class="clearfind">Hapus</button>' : '') +
+        '<span class="hint">ketik 11 untuk semua KP 11</span>' +
+        '</div>';
+
+      var controls = tabs + chips + find;
+
       if (!res.records.length) {
-        cell.innerHTML = tabs + '<p class="note">' + (res.filter === 'issues'
-          ? 'Tidak ada yang perlu diperiksa pada segment ini — semuanya Baik dan ' +
-            'tidak ada catatan otomatis.'
-          : 'Tidak ada rekaman.') + '</p>';
+        cell.innerHTML = controls + '<p class="note">' +
+          (res.query || res.category
+            ? 'Tidak ada rekaman yang cocok. Hapus pencarian atau pilih jenis lain.'
+            : res.filter === 'issues'
+              ? 'Tidak ada yang perlu diperiksa pada segment ini — semuanya Baik ' +
+                'dan tidak ada catatan otomatis.'
+              : 'Tidak ada rekaman.') + '</p>';
       } else {
         var figures = res.records.map(function (r) {
           return '<figure class="shot">' +
@@ -691,21 +742,64 @@ function loadRecords(zone, segment, sid, filter, host, offset) {
               '</div>'
             : '');
 
-        cell.innerHTML = tabs + '<div class="grid">' + figures + '</div>' +
+        cell.innerHTML = controls + '<div class="grid">' + figures + '</div>' +
           '<div class="tail">' + footer + '</div>';
       }
 
+      var input = cell.querySelector('.kpfind');
+      if (input && searchHadFocus) {
+        input.focus();
+        try { input.setSelectionRange(caret, caret); } catch (e) {}
+      }
+
+      // A changed tab, chip or search starts at the first page: staying on
+      // page 3 of a list that is now 40 records long shows nothing.
       cell.querySelectorAll('.tab').forEach(function (b) {
         b.addEventListener('click', function (ev) {
           ev.stopPropagation();
-          loadRecords(zone, segment, sid, b.dataset.filter);
+          loadRecords(zone, segment, sid,
+                      { filter: b.dataset.filter, category: category, query: query },
+                      cell);
         });
       });
+      cell.querySelectorAll('.chip').forEach(function (b) {
+        b.addEventListener('click', function (ev) {
+          ev.stopPropagation();
+          loadRecords(zone, segment, sid,
+                      { filter: res.filter, category: b.dataset.cat, query: query },
+                      cell);
+        });
+      });
+      if (input) {
+        var typing = null;
+        input.addEventListener('click', function (ev) { ev.stopPropagation(); });
+        input.addEventListener('input', function () {
+          // A search reaches the server, so wait for the typing to stop rather
+          // than firing a request per keystroke.
+          clearTimeout(typing);
+          var value = input.value;
+          typing = setTimeout(function () {
+            loadRecords(zone, segment, sid,
+                        { filter: res.filter, category: res.category, query: value },
+                        cell);
+          }, 400);
+        });
+      }
+      var clearFind = cell.querySelector('.clearfind');
+      if (clearFind) {
+        clearFind.addEventListener('click', function (ev) {
+          ev.stopPropagation();
+          loadRecords(zone, segment, sid,
+                      { filter: res.filter, category: res.category, query: '' }, cell);
+        });
+      }
       cell.querySelectorAll('.pager button').forEach(function (b) {
         b.addEventListener('click', function (ev) {
           ev.stopPropagation();
           var step = b.className === 'prev' ? -res.pageSize : res.pageSize;
-          loadRecords(zone, segment, sid, res.filter, cell, res.offset + step);
+          loadRecords(zone, segment, sid,
+                      { filter: res.filter, category: res.category,
+                        query: res.query, offset: res.offset + step }, cell);
           // The reader is at the bottom, having just been through a page. Put
           // them at the top of the next one rather than the bottom of it.
           cell.scrollIntoView({ block: 'start' });
