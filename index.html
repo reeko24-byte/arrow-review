@@ -76,10 +76,12 @@
   .shot .w{color:var(--warn-ink)}
   .note-btn{font-size:11px;font-weight:620;padding:5px 10px;border-radius:12px;
     background:var(--field);color:var(--accent);border:0;margin-top:5px;cursor:pointer}
-  .more{font-size:12.5px;font-weight:620;padding:9px 16px;border-radius:16px;
-    background:var(--field);color:var(--accent);border:0;margin:0 2px 12px;
+  .pager{display:flex;align-items:center;gap:10px;padding:0 2px 12px}
+  .pager button{font-size:12.5px;font-weight:620;padding:9px 16px;
+    border-radius:16px;background:var(--field);color:var(--accent);border:0;
     cursor:pointer}
-  .more[disabled]{color:var(--ink-2);cursor:default}
+  .pager button[disabled]{color:var(--ink-2);cursor:default}
+  .pager .at{font-size:12px;color:var(--ink-2)}
 
   .cats{border:1px solid var(--rule);border-radius:6px;margin:12px 2px}
   .cats h4{margin:0;padding:10px 13px;font-size:13px;font-weight:680;
@@ -628,20 +630,17 @@ function loadRecords(zone, segment, sid, filter, host, offset) {
     .firstElementChild.querySelector('.photohost');
   offset = offset || 0;
 
-  // A first load replaces the container; a later page keeps the photographs
-  // already on screen and reports itself on the button that asked for it.
-  var button = offset ? cell.querySelector('.more') : null;
-  if (button) { button.disabled = true; button.textContent = 'Memuat…'; }
-  else cell.innerHTML = '<p class="note">Memuat…</p>';
+  // Each page replaces the one before it. Keeping them all on screen would put
+  // 344 thumbnails in the document on a phone, which is what the page size
+  // exists to avoid -- and it bought nothing, because filing a catatan calls
+  // load(), which rebuilds the table and closes the segment. A page number
+  // survives that; a scroll position never did.
+  cell.innerHTML = '<p class="note">Memuat…</p>';
 
   call('segmentRecords', { zone: zone, segment: segment, filter: filter,
                            offset: offset })
     .then(function (res) {
-      if (!res.ok) {
-        if (button) { button.disabled = false; button.textContent = esc(res.error); }
-        else cell.innerHTML = '<p class="note">' + esc(res.error) + '</p>';
-        return;
-      }
+      if (!res.ok) { cell.innerHTML = '<p class="note">' + esc(res.error) + '</p>'; return; }
 
       var tabs = '<div class="tabs">' +
         [['issues', 'Perlu diperiksa'], ['good', 'Baik'], ['all', 'Semua']]
@@ -651,10 +650,6 @@ function loadRecords(zone, segment, sid, filter, host, offset) {
           }).join('') + '</div>';
 
       if (!res.records.length) {
-        // Only reachable on a first load: a later page is asked for only when
-        // the server said there was more. If it happens anyway, drop the button
-        // rather than throwing away what is on screen.
-        if (button) { button.outerHTML = ''; return; }
         cell.innerHTML = tabs + '<p class="note">' + (res.filter === 'issues'
           ? 'Tidak ada yang perlu diperiksa pada segment ini — semuanya Baik dan ' +
             'tidak ada catatan otomatis.'
@@ -676,55 +671,47 @@ function loadRecords(zone, segment, sid, filter, host, offset) {
             '</figcaption></figure>';
         }).join('');
 
-        var loaded = res.offset + res.shown;
+        var pages = Math.ceil(res.total / res.pageSize);
+        var page = Math.floor(res.offset / res.pageSize) + 1;
         var footer = '<p class="note">' +
-          (res.more
-            ? 'Menampilkan ' + loaded + ' dari ' + res.total + ' rekaman'
+          (pages > 1
+            ? 'Rekaman ' + (res.offset + 1) + '-' + (res.offset + res.shown) +
+              ' dari ' + res.total
             : res.total + ' rekaman') +
           '. Ketuk foto untuk membukanya ukuran penuh.</p>' +
-          (res.more
-            ? '<button class="more">Muat ' +
-              Math.min(res.remaining, res.pageSize) + ' berikutnya' +
-              (res.remaining > res.pageSize ? ' (sisa ' + res.remaining + ')' : '') +
-              '</button>'
+          // Only where there is more than one page. On the filter that matters
+          // most -- the handful needing a decision -- there never is.
+          (pages > 1
+            ? '<div class="pager">' +
+              '<button class="prev"' + (page === 1 ? ' disabled' : '') +
+                '>&lsaquo; Sebelumnya</button>' +
+              '<span class="at">Halaman ' + page + ' dari ' + pages + '</span>' +
+              '<button class="next"' + (page === pages ? ' disabled' : '') +
+                '>Berikutnya &rsaquo;</button>' +
+              '</div>'
             : '');
 
-        if (button) {
-          // Appended, so the reviewer keeps their place among the photographs
-          // they have already been through.
-          cell.querySelector('.grid').insertAdjacentHTML('beforeend', figures);
-          cell.querySelector('.tail').innerHTML = footer;
-        } else {
-          cell.innerHTML = tabs + '<div class="grid">' + figures + '</div>' +
-            '<div class="tail">' + footer + '</div>';
-        }
+        cell.innerHTML = tabs + '<div class="grid">' + figures + '</div>' +
+          '<div class="tail">' + footer + '</div>';
       }
 
       cell.querySelectorAll('.tab').forEach(function (b) {
-        // Same reason as the note buttons below: an appended page re-runs this
-        // over tabs that are already wired, and a doubled listener would fire
-        // two loads for one press.
-        if (b.dataset.bound) return;
-        b.dataset.bound = '1';
         b.addEventListener('click', function (ev) {
           ev.stopPropagation();
           loadRecords(zone, segment, sid, b.dataset.filter);
         });
       });
-      var more = cell.querySelector('.more');
-      if (more) {
-        more.addEventListener('click', function (ev) {
+      cell.querySelectorAll('.pager button').forEach(function (b) {
+        b.addEventListener('click', function (ev) {
           ev.stopPropagation();
-          loadRecords(zone, segment, sid, res.filter, cell, res.offset + res.shown);
+          var step = b.className === 'prev' ? -res.pageSize : res.pageSize;
+          loadRecords(zone, segment, sid, res.filter, cell, res.offset + step);
+          // The reader is at the bottom, having just been through a page. Put
+          // them at the top of the next one rather than the bottom of it.
+          cell.scrollIntoView({ block: 'start' });
         });
-      }
+      });
       cell.querySelectorAll('.note-btn').forEach(function (b) {
-        // Run again after each appended page, over a container that still holds
-        // the earlier figures. Without this the buttons already on screen would
-        // collect a second listener, and one press would open two prompts and
-        // file the note twice.
-        if (b.dataset.bound) return;
-        b.dataset.bound = '1';
         b.addEventListener('click', function (ev) {
           ev.stopPropagation();
           var note = prompt('Catatan untuk KP ' + b.dataset.kp +
