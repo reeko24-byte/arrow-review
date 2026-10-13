@@ -79,6 +79,8 @@
   .shot .was{color:var(--ink-2);text-decoration:line-through}
   .shot .fixed{color:var(--ink-2);font-style:italic}
   .fixrow{display:inline-flex;gap:4px;flex-wrap:wrap;margin-top:4px}
+  .obfix{display:flex;gap:5px;flex-wrap:wrap;align-items:center;margin-top:6px;
+    font-size:12px;color:var(--text-muted)}
   .fix-btn{font-size:11px;font-weight:620;padding:4px 8px;border-radius:12px;
     background:var(--surface);color:var(--accent);border:1px solid var(--line);
     cursor:pointer}
@@ -460,6 +462,21 @@ function card(d) {
           esc(o.at) + (o.actioned ? ' · sudah ditindaklanjuti' : '') + '</span>' +
           (!o.actioned && STATE.who.role === 'Data Analyst'
             ? ' <button class="act" data-row="' + o.row + '">tandai selesai</button>' : '') +
+          // The point of a note is usually that the condition is wrong, so
+          // offer the change here. Closing a note used to be the only thing on
+          // offer, which recorded that somebody looked and nothing else.
+          (!o.actioned && STATE.who.role === 'Data Analyst' && o.recordId
+            ? '<div class="obfix">ubah kondisi menjadi ' +
+              ['Good', 'Damaged', 'Missing'].map(function (c) {
+                return '<button class="fix-btn" data-record="' + esc(o.recordId) +
+                  '" data-kp="' + esc(o.kp) + '" data-obs="' + o.row +
+                  '" data-to="' + c + '">' + c + '</button>';
+              }).join('') + '</div>'
+            : '') +
+          (!o.actioned && STATE.who.role === 'Data Analyst' && !o.recordId
+            ? '<div class="dim">Catatan lama: belum menyimpan rekaman mana yang ' +
+              'dimaksud, jadi buka segmennya untuk mengubah kondisi.</div>'
+            : '') +
           '</div>';
       }).join('') + '</div>'
     : '';
@@ -707,6 +724,43 @@ function bindCard() {
       loadNaming(b.dataset.zone, host, {});
     });
   });
+  // Correction buttons sitting on an observation, as opposed to the identical
+  // ones on a photo card -- those are bound inside loadRecords, against the
+  // cell they live in. These carry the note's row so acting on it closes it.
+  document.querySelectorAll('.obfix .fix-btn').forEach(function (b) {
+    b.addEventListener('click', function () {
+      var to = b.dataset.to;
+      var reason = prompt('Ubah kondisi KP ' + b.dataset.kp + ' menjadi ' + to +
+        '. Foto tetap memperlihatkan kondisi lama, karena kondisi tercetak di ' +
+        'fotonya dan tidak dapat diambil ulang dari sini. Alasan di bawah ini ' +
+        'yang menjelaskannya, dan wajib diisi:', '');
+      if (reason === null) return;
+      if (!reason.trim()) { say('err', 'Alasan wajib diisi'); return; }
+      var group = b.parentNode.querySelectorAll('button');
+      group.forEach(function (x) { x.disabled = true; });
+      call('correctCondition', {
+        recordId: b.dataset.record, condition: to, reason: reason,
+        observationRow: b.dataset.obs
+      }).then(function (res) {
+        if (!res.ok) {
+          group.forEach(function (x) { x.disabled = false; });
+          say('err', res.error);
+          return;
+        }
+        say('ok', 'Kondisi ' + res.from + ' → ' + res.to +
+          ', catatan ditutup. ' +
+          (res.undone
+            ? res.undone + ' tanda tangan dibatalkan — distrik ini perlu ' +
+              'disetujui ulang.'
+            : 'Belum ada tanda tangan yang terpengaruh.'));
+        load();
+      }).catch(function (e) {
+        group.forEach(function (x) { x.disabled = false; });
+        say('err', e.message);
+      });
+    });
+  });
+
   document.querySelectorAll('.act').forEach(function (b) {
     b.addEventListener('click', function () {
       b.disabled = true;
@@ -994,7 +1048,8 @@ function loadRecords(zone, segment, sid, opts, host) {
             (r.why.length ? '<br><span class="w">' + r.why.map(esc).join(' \u00b7 ') + '</span>' : '') +
             '<br><span class="dim">' + esc(r.operator) + ' \u00b7 ' + esc(r.time) + '</span>' +
             fixed +
-            '<br><button class="note-btn" data-kp="' + esc(r.kp) +
+            '<br><button class="note-btn" data-record="' + esc(r.recordId) +
+              '" data-kp="' + esc(r.kp) +
               '" data-category="' + esc(r.category) + '">+ catatan</button>' +
             fix +
             '</figcaption></figure>';
@@ -1128,7 +1183,10 @@ function loadRecords(zone, segment, sid, opts, host) {
           b.disabled = true;
           call('observe', {
             zone: zone, segment: segment, kp: b.dataset.kp,
-            category: b.dataset.category, note: note
+            category: b.dataset.category, note: note,
+            // Carried so the Data Analyst can act on the note where they read
+            // it, instead of hunting the photo card down again.
+            recordId: b.dataset.record
           }).then(function (res) {
             b.disabled = false;
             say(res.ok ? 'ok' : 'err',
