@@ -76,6 +76,13 @@
   .shot .w{color:var(--warn-ink)}
   .note-btn{font-size:11px;font-weight:620;padding:5px 10px;border-radius:12px;
     background:var(--field);color:var(--accent);border:0;margin-top:5px;cursor:pointer}
+  .shot .was{color:var(--ink-2);text-decoration:line-through}
+  .shot .fixed{color:var(--ink-2);font-style:italic}
+  .fixrow{display:inline-flex;gap:4px;flex-wrap:wrap;margin-top:4px}
+  .fix-btn{font-size:11px;font-weight:620;padding:4px 8px;border-radius:12px;
+    background:var(--surface);color:var(--accent);border:1px solid var(--line);
+    cursor:pointer}
+  .fix-btn:disabled{opacity:.5;cursor:default}
   .namebar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;
     padding:12px 2px 0}
   .namebar .why{font-size:12.5px;color:var(--text-muted);flex:1;min-width:200px}
@@ -178,6 +185,7 @@
   .msg{padding:12px 15px;border-radius:8px;margin-bottom:14px;font-size:14px}
   .msg.err{background:var(--crit-bg);color:var(--crit)}
   .msg.ok{background:#E7F6E7;color:#0a6b0a}
+  .msg.late{background:var(--warn-bg);color:var(--warn-ink)}
   .note{color:var(--ink-2);font-size:13px;margin:8px 0 0}
   .dim{color:var(--ink-2)}
   .ok{color:var(--good)}
@@ -472,7 +480,21 @@ function card(d) {
         'Setelah data diperbaiki, ' + d.rejection.role + ' yang membuka kembali ' +
         'dengan menyetujui.'
     : d.approved ? 'Alur persetujuan sudah lengkap.'
+    : d.pending
+      ? d.pending + ' rekaman masuk setelah tanda tangan terakhir, jadi alur ' +
+        'diulang dari ' + d.waitingOn + ' untuk rekaman itu. Yang sudah ' +
+        'disetujui sebelumnya tetap sah.'
     : 'Menunggu tanda tangan ' + d.waitingOn + ' terlebih dahulu.';
+
+  // A tanda tangan now reaches only as far as the records that existed when it
+  // was given. Saying so is the difference between "this reopened because new
+  // work came in" and "the approval I gave yesterday has vanished".
+  var lateBanner = (d.pending && !rejected)
+    ? '<div class="msg late"><b>' + d.pending + ' rekaman lebih baru dari ' +
+      'tanda tangan</b><br>Tanda tangan mencakup rekaman yang sudah ada saat ' +
+      'diberikan. Yang masuk sesudahnya menunggu persetujuannya sendiri, ' +
+      'mulai dari ' + esc(d.waitingOn) + '.</div>'
+    : '';
 
   var rejectBanner = (rejected && !d.approved)
     ? '<div class="msg err"><b>Ditolak oleh ' + esc(d.rejection.role) + ' · ' +
@@ -510,6 +532,7 @@ function card(d) {
           esc(d.operators.join(', ')) + '</b>operator</div>' +
       '</div>' +
       '<div class="chain">' + chain + '</div>' +
+      lateBanner +
       rejectBanner +
       obs +
       (d.reviewedBy.length
@@ -938,18 +961,42 @@ function loadRecords(zone, segment, sid, opts, host) {
               : 'Tidak ada rekaman.') + '</p>';
       } else {
         var figures = res.records.map(function (r) {
+          // After a correction the row and the photograph disagree, because the
+          // condition is stamped into the picture and nothing here can retake
+          // it. Both are shown, always. A reviewer given only the new value
+          // concludes the photograph is the thing that is wrong.
+          var shown = r.corrected
+            ? '<s class="was">' + esc(r.corrected.from) + '</s> \u2192 <b>' +
+              esc(r.corrected.to) + '</b>'
+            : esc(r.condition);
+          var fixed = r.corrected
+            ? '<br><span class="fixed">diubah ' + esc(r.corrected.by) + ' \u00b7 ' +
+              esc(r.corrected.at) + '<br>' + esc(r.corrected.reason) + '</span>'
+            : '';
+          // Only the Data Analyst, matching who may close an observation.
+          var fix = (STATE.who.role === 'Data Analyst' && r.recordId)
+            ? '<br><span class="fixrow">' + ['Good', 'Damaged', 'Missing']
+                .filter(function (c) { return c !== r.condition; })
+                .map(function (c) {
+                  return '<button class="fix-btn" data-record="' +
+                    esc(r.recordId) + '" data-kp="' + esc(r.kp) +
+                    '" data-to="' + c + '">\u2192 ' + c + '</button>';
+                }).join('') + '</span>'
+            : '';
           return '<figure class="shot">' +
             (r.photo
               ? '<a href="' + esc(r.photo) + '" target="_blank" rel="noopener">' +
                 '<img src="' + esc(r.photo) + '" loading="lazy" alt=""></a>'
               : '<div class="nophoto">tanpa foto</div>') +
-            '<figcaption><b>KP ' + esc(r.kp) + '</b> · ' + esc(r.condition) +
+            '<figcaption><b>KP ' + esc(r.kp) + '</b> \u00b7 ' + shown +
             '<br>' + esc(r.category) +
             (r.note ? '<br><i>' + esc(r.note) + '</i>' : '') +
-            (r.why.length ? '<br><span class="w">' + r.why.map(esc).join(' · ') + '</span>' : '') +
-            '<br><span class="dim">' + esc(r.operator) + ' · ' + esc(r.time) + '</span>' +
+            (r.why.length ? '<br><span class="w">' + r.why.map(esc).join(' \u00b7 ') + '</span>' : '') +
+            '<br><span class="dim">' + esc(r.operator) + ' \u00b7 ' + esc(r.time) + '</span>' +
+            fixed +
             '<br><button class="note-btn" data-kp="' + esc(r.kp) +
               '" data-category="' + esc(r.category) + '">+ catatan</button>' +
+            fix +
             '</figcaption></figure>';
         }).join('');
 
@@ -1034,6 +1081,41 @@ function loadRecords(zone, segment, sid, opts, host) {
           // The reader is at the bottom, having just been through a page. Put
           // them at the top of the next one rather than the bottom of it.
           cell.scrollIntoView({ block: 'start' });
+        });
+      });
+      cell.querySelectorAll('.fix-btn').forEach(function (b) {
+        b.addEventListener('click', function (ev) {
+          ev.stopPropagation();
+          var to = b.dataset.to;
+          var reason = prompt('Ubah kondisi KP ' + b.dataset.kp +
+            ' menjadi ' + to + '.\n\nFoto tetap memperlihatkan kondisi lama, ' +
+            'karena kondisi tercetak di fotonya dan tidak dapat diambil ulang ' +
+            'dari sini. Alasan di bawah ini yang menjelaskannya, dan wajib ' +
+            'diisi:', '');
+          if (reason === null) return;
+          if (!reason.trim()) { say('err', 'Alasan wajib diisi'); return; }
+          var group = b.parentNode.querySelectorAll('button');
+          group.forEach(function (x) { x.disabled = true; });
+          call('correctCondition', {
+            recordId: b.dataset.record, condition: to, reason: reason
+          }).then(function (res) {
+            if (!res.ok) {
+              group.forEach(function (x) { x.disabled = false; });
+              say('err', res.error);
+              return;
+            }
+            // Say what it cost. Four signatures falling over is not something
+            // to discover later from the summary.
+            say('ok', 'Kondisi ' + res.from + ' \u2192 ' + res.to + '. ' +
+              (res.undone
+                ? res.undone + ' tanda tangan dibatalkan \u2014 distrik ini ' +
+                  'perlu disetujui ulang.'
+                : 'Belum ada tanda tangan yang terpengaruh.'));
+            load();
+          }).catch(function (e) {
+            group.forEach(function (x) { x.disabled = false; });
+            say('err', e.message);
+          });
         });
       });
       cell.querySelectorAll('.note-btn').forEach(function (b) {
