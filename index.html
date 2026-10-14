@@ -1212,7 +1212,32 @@ function sign(button, zone, decision, reason) {
     .catch(function (e) { say('err', e.message); load(); });
 }
 
-load();
+/**
+ * Where the backend is now.
+ *
+ * `endpoint.json` sits beside this page and is the one place a moved
+ * deployment is recorded. The constant above stays as a fallback for the same
+ * reason the phone keeps one: a discovery that fails should cost nothing,
+ * because the address it would have found is usually the address already held.
+ *
+ * Validated before use. A Pages 404 is an HTML page, and adopting that as an
+ * endpoint would replace a working address with one that can never work.
+ */
+function resolveEndpoint() {
+  return fetch('endpoint.json', { cache: 'no-store' })
+    .then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (d) {
+      var url = d && d.exec;
+      if (typeof url === 'string' &&
+          url.indexOf('https://script.google.com/macros/s/') === 0 &&
+          url.slice(-5) === '/exec') {
+        ENDPOINT = url;
+      }
+    })
+    .catch(function () { /* keep the built-in address */ });
+}
+
+resolveEndpoint().then(load);
 </script>
 </body>
 </html>
