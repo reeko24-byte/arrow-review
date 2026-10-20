@@ -188,6 +188,12 @@
   .msg.err{background:var(--crit-bg);color:var(--crit)}
   .msg.ok{background:#E7F6E7;color:#0a6b0a}
   .msg.late{background:var(--warn-bg);color:var(--warn-ink)}
+  #changed{position:fixed;left:50%;transform:translateX(-50%);bottom:18px;
+    z-index:50;display:none;align-items:center;gap:10px;padding:10px 14px;
+    border-radius:999px;background:var(--accent);color:#fff;font-size:13.5px;
+    box-shadow:0 6px 20px rgba(0,0,0,.25)}
+  #changed button{border:0;border-radius:999px;padding:6px 12px;font-size:13px;
+    font-weight:650;background:#fff;color:var(--accent);cursor:pointer}
   .note{color:var(--ink-2);font-size:13px;margin:8px 0 0}
   .dim{color:var(--ink-2)}
   .ok{color:var(--good)}
@@ -195,6 +201,8 @@
 </style>
 </head>
 <body>
+<div id="changed"><span>Ada perubahan baru dari peninjau lain.</span>
+  <button type="button" id="changed-go">Muat ulang</button></div>
 <div class="bar">
   <b>ARROW</b>
   <span>Pemeriksaan Data · <span id="month"></span></span>
@@ -1237,7 +1245,42 @@ function resolveEndpoint() {
     .catch(function () { /* keep the built-in address */ });
 }
 
-resolveEndpoint().then(load);
+/**
+ * Watch for someone else's move.
+ *
+ * Two people hand a district back and forth and neither can see the other, so
+ * both sit refreshing -- and a refresh rebuilds the whole summary. `reviewRevision`
+ * is four getLastRow() calls, cheap enough to ask every twenty seconds.
+ *
+ * It raises a banner rather than reloading. Someone halfway through typing a
+ * note should not have the page pulled out from under them, and the one thing
+ * worse than refreshing by hand is losing what you were writing.
+ */
+var REVISION = null;
+
+function watchForChanges() {
+  if (!SESSION) return;
+  call('reviewRevision').then(function (res) {
+    if (!res || !res.ok) return;
+    if (REVISION === null) { REVISION = res.revision; return; }
+    if (res.revision !== REVISION) {
+      document.getElementById('changed').style.display = 'flex';
+    }
+  }).catch(function () { /* a missed poll is not worth reporting */ });
+}
+
+document.getElementById('changed-go').addEventListener('click', function () {
+  document.getElementById('changed').style.display = 'none';
+  REVISION = null;
+  load();
+});
+
+setInterval(watchForChanges, 20000);
+
+resolveEndpoint().then(function () {
+  load();
+  watchForChanges();
+});
 </script>
 </body>
 </html>
