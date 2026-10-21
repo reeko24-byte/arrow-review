@@ -273,15 +273,25 @@ function say(kind, text) {
 function call(action, extra) {
   var payload = Object.assign({ action: action, token: TOKEN, session: SESSION,
                                 month: MONTH }, extra || {});
+  IN_FLIGHT++;
   return fetch(ENDPOINT, {
     method: 'POST',
     headers: { 'Content-Type': 'text/plain;charset=utf-8' },
     body: JSON.stringify(payload)
+  }).catch(function (e) {
+    // Replace the browser's bare "Failed to fetch" before it reaches anything
+    // that shows it to a reviewer, and say which call it was -- a failure that
+    // does not name itself is one nobody can chase.
+    throw new Error(fetchProblem(e, action));
   }).then(function (r) { return r.json(); }).then(function (res) {
     // A session lasts a working day. When it lapses mid-review, ask for the PIN
     // again rather than showing an error the reviewer cannot act on.
     if (res && res.needPin) { SESSION = ''; store(''); askPin(res.error); }
+    IN_FLIGHT--;
     return res;
+  }, function (e) {
+    IN_FLIGHT--;
+    throw e;
   });
 }
 
@@ -1231,6 +1241,8 @@ function sign(button, zone, decision, reason) {
  * Validated before use. A Pages 404 is an HTML page, and adopting that as an
  * endpoint would replace a working address with one that can never work.
  */
+var ENDPOINT_SOURCE = 'alamat bawaan halaman';
+
 function resolveEndpoint() {
   return fetch('endpoint.json', { cache: 'no-store' })
     .then(function (r) { return r.ok ? r.json() : null; })
@@ -1240,9 +1252,44 @@ function resolveEndpoint() {
           url.indexOf('https://script.google.com/macros/s/') === 0 &&
           url.slice(-5) === '/exec') {
         ENDPOINT = url;
+        ENDPOINT_SOURCE = 'endpoint.json';
       }
     })
     .catch(function () { /* keep the built-in address */ });
+}
+
+/**
+ * Why a request never got an answer.
+ *
+ * `fetch` rejects with "Failed to fetch" for every network-level failure and
+ * names neither the address nor the cause, which is the least useful thing it
+ * could say. Each case below is actionable, and the first is the one that
+ * catches people out: a page opened from disk cannot call anything at all, and
+ * looks exactly like a backend that is down.
+ */
+/**
+ * How many requests are outstanding.
+ *
+ * Apps Script answers overlapping executions with an HTML error page -- 200
+ * and no Access-Control-Allow-Origin -- which the browser reports as a bare
+ * "Failed to fetch". The background poll must never add to that, so it stands
+ * aside whenever anything else is talking.
+ */
+var IN_FLIGHT = 0;
+
+function fetchProblem(error, action) {
+  if (location.protocol === 'file:') {
+    return 'Halaman ini dibuka langsung dari berkas (file://), dan peramban '
+      + 'melarang panggilan jaringan dari situ. Buka lewat alamat '
+      + 'https://reeko24-byte.github.io/arrow-review/';
+  }
+  return 'Tidak dapat menghubungi backend pada permintaan "'
+    + (action || 'tidak diketahui') + '".'
+    + ' Alamat yang dicoba (' + ENDPOINT_SOURCE + '): ' + ENDPOINT
+    + ' — periksa koneksi, lalu pastikan deployment Apps Script masih aktif.'
+    + ' Bila ini muncul saat dua orang bekerja bersamaan, kemungkinan besar dua'
+    + ' permintaan bertabrakan; coba lagi sebentar.'
+    + ' Pesan peramban: ' + (error && error.message ? error.message : error);
 }
 
 /**
@@ -1260,6 +1307,9 @@ var REVISION = null;
 
 function watchForChanges() {
   if (!SESSION) return;
+  // Never poll over the top of real work. A missed poll costs twenty seconds;
+  // a collision costs a request nobody can explain.
+  if (IN_FLIGHT > 0) return;
   call('reviewRevision').then(function (res) {
     if (!res || !res.ok) return;
     if (REVISION === null) { REVISION = res.revision; return; }
