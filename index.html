@@ -1270,10 +1270,14 @@ function resolveEndpoint() {
 /**
  * How many requests are outstanding.
  *
- * Apps Script answers overlapping executions with an HTML error page -- 200
- * and no Access-Control-Allow-Origin -- which the browser reports as a bare
- * "Failed to fetch". The background poll must never add to that, so it stands
- * aside whenever anything else is talking.
+ * Every call to Apps Script costs about 1.8 seconds before any of our code
+ * runs -- measured, not guessed -- so a background poll firing while someone
+ * waits on a real answer is competing for the one slow channel they need. The
+ * poll stands aside whenever anything else is talking.
+ *
+ * It was first added on the theory that overlapping executions were causing
+ * CORS failures. That turned out to be wrong, and the guard is kept on the
+ * cost argument above rather than that one.
  */
 var IN_FLIGHT = 0;
 
@@ -1287,8 +1291,9 @@ function fetchProblem(error, action) {
     + (action || 'tidak diketahui') + '".'
     + ' Alamat yang dicoba (' + ENDPOINT_SOURCE + '): ' + ENDPOINT
     + ' — periksa koneksi, lalu pastikan deployment Apps Script masih aktif.'
-    + ' Bila ini muncul saat dua orang bekerja bersamaan, kemungkinan besar dua'
-    + ' permintaan bertabrakan; coba lagi sebentar.'
+    + ' Bila sebagian permintaan berhasil dan hanya yang membaca data yang'
+    + ' gagal, periksa pemilik Google Sheets ARROW: penyimpanan Drive pemilik'
+    + ' yang habis membuat permintaan gagal persis seperti ini.'
     + ' Pesan peramban: ' + (error && error.message ? error.message : error);
 }
 
@@ -1297,7 +1302,7 @@ function fetchProblem(error, action) {
  *
  * Two people hand a district back and forth and neither can see the other, so
  * both sit refreshing -- and a refresh rebuilds the whole summary. `reviewRevision`
- * is four getLastRow() calls, cheap enough to ask every twenty seconds.
+ * is four getLastRow() calls, cheap enough to ask every ten seconds.
  *
  * It raises a banner rather than reloading. Someone halfway through typing a
  * note should not have the page pulled out from under them, and the one thing
@@ -1307,8 +1312,8 @@ var REVISION = null;
 
 function watchForChanges() {
   if (!SESSION) return;
-  // Never poll over the top of real work. A missed poll costs twenty seconds;
-  // a collision costs a request nobody can explain.
+  // Never poll over the top of real work. A missed poll costs ten seconds;
+  // getting in the way of a signature costs the person waiting on it.
   if (IN_FLIGHT > 0) return;
   call('reviewRevision').then(function (res) {
     if (!res || !res.ok) return;
@@ -1325,7 +1330,7 @@ document.getElementById('changed-go').addEventListener('click', function () {
   load();
 });
 
-setInterval(watchForChanges, 20000);
+setInterval(watchForChanges, 10000);
 
 resolveEndpoint().then(function () {
   load();
